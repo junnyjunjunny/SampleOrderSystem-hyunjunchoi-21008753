@@ -1,14 +1,28 @@
 import math
 from datetime import datetime, timezone
 
-from app.models import CONFIRMED, PRODUCTION, REJECTED, RECEIVED, RELEASE, Order
+from app.models import CONFIRMED, PRODUCING, REJECTED, RESERVED, RELEASE, Order
 from app.repository import OrderRepository, SampleRepository
 
 ALLOWED_TRANSITIONS = {
-    RECEIVED: {CONFIRMED, PRODUCTION, REJECTED},
-    PRODUCTION: {CONFIRMED},
+    RESERVED: {CONFIRMED, PRODUCING, REJECTED},
+    PRODUCING: {CONFIRMED},
     CONFIRMED: {RELEASE},
 }
+
+PENDING_STATUSES = (RESERVED, PRODUCING)
+
+STOCK_ABUNDANT = "여유"
+STOCK_LOW = "부족"
+STOCK_DEPLETED = "고갈"
+
+
+def stock_status(stock: int, pending_quantity: int) -> str:
+    if stock == 0:
+        return STOCK_DEPLETED
+    if stock >= pending_quantity:
+        return STOCK_ABUNDANT
+    return STOCK_LOW
 
 
 class OrderService:
@@ -26,13 +40,13 @@ class OrderService:
     def receive_order(self, sample_id: str, customer_name: str, quantity: int) -> str:
         self.sample_repo.get(sample_id)
         order_id = self.order_repo.next_order_id(datetime.now().strftime("%Y%m%d"))
-        order = Order(order_id, sample_id, customer_name, quantity, RECEIVED, datetime.now(timezone.utc).isoformat())
+        order = Order(order_id, sample_id, customer_name, quantity, RESERVED, datetime.now(timezone.utc).isoformat())
         self.order_repo.create(order)
         return order_id
 
     def decide(self, order_id: str, approve: bool) -> str:
         order = self.order_repo.get(order_id)
-        if order.status != RECEIVED:
+        if order.status != RESERVED:
             raise ValueError(f"Cannot decide order {order_id} from status {order.status}")
         if not approve:
             self._transition(order_id, REJECTED)
@@ -46,20 +60,20 @@ class OrderService:
         production_quantity = math.ceil(shortage / sample.yield_rate)
         self.order_repo.set_production_quantity(order_id, production_quantity)
         self.order_repo.set_production_queue_seq(order_id, self.order_repo.next_production_queue_seq())
-        self._transition(order_id, PRODUCTION)
+        self._transition(order_id, PRODUCING)
         self.advance_production_line()
-        return PRODUCTION
+        return PRODUCING
 
     def complete_production(self, order_id: str) -> None:
         order = self.order_repo.get(order_id)
-        if order.status != PRODUCTION:
+        if order.status != PRODUCING:
             raise ValueError(f"Cannot complete production for order {order_id} from status {order.status}")
         sample = self.sample_repo.get(order.sample_id)
         self._transition(order_id, CONFIRMED)
         self.sample_repo.update_stock(sample.sample_id, sample.stock + order.production_quantity - order.quantity)
 
     def advance_production_line(self) -> None:
-        orders = self.order_repo.list_all(PRODUCTION)
+        orders = self.order_repo.list_all(PRODUCING)
         current = next((o for o in orders if o.production_started_at), None)
         if current is not None:
             sample = self.sample_repo.get(current.sample_id)
@@ -68,7 +82,7 @@ class OrderService:
             elapsed_minutes = (datetime.now(timezone.utc) - started).total_seconds() / 60
             if elapsed_minutes >= total_minutes:
                 self.complete_production(current.order_id)
-                orders = self.order_repo.list_all(PRODUCTION)
+                orders = self.order_repo.list_all(PRODUCING)
                 current = None
         if current is None:
             waiting = sorted(orders, key=lambda o: (o.production_queue_seq is None, o.production_queue_seq or 0, o.created_at))
@@ -83,3 +97,11 @@ class OrderService:
 
     def ship(self, order_id: str) -> None:
         self._transition(order_id, RELEASE)
+
+    def pending_order_quantity(self, sample_id: str) -> int:
+        return sum(
+            o.quantity
+            for status in PENDING_STATUSES
+            for o in self.order_repo.list_all(status)
+            if o.sample_id == sample_id
+        )

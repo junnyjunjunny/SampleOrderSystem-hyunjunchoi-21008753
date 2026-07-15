@@ -34,6 +34,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE orders ADD COLUMN production_started_at TEXT")
     if "production_queue_seq" not in existing_columns:
         conn.execute("ALTER TABLE orders ADD COLUMN production_queue_seq INTEGER")
+    # RECEIVED/PRODUCTION were the old (spec-mismatched) status names; rewrite any rows still using them.
+    conn.execute("UPDATE orders SET status = 'RESERVED' WHERE status = 'RECEIVED'")
+    conn.execute("UPDATE orders SET status = 'PRODUCING' WHERE status = 'PRODUCTION'")
     conn.commit()
 
 

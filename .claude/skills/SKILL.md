@@ -309,7 +309,7 @@ TDD가 곧 실용적이다:
 class OrderServiceTest(unittest.TestCase):
     def test_approve_with_insufficient_stock_raises(self):
         self.sample_repo.create(Sample("S1", "Wafer-A", 10.0, 0.95, stock=5))
-        self.order_repo.create(Order("O1", "S1", "ACME", quantity=10, status="RECEIVED", created_at="..."))
+        self.order_repo.create(Order("O1", "S1", "ACME", quantity=10, status="RESERVED", created_at="..."))
 
         with self.assertRaises(ValueError):
             self.service.approve("O1")

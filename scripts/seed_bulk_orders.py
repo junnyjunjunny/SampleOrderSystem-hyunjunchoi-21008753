@@ -36,7 +36,7 @@ def seed() -> None:
         return
     finally:
         conn.close()
-    print(f"시딩 완료: 주문 {len(created)}건 접수 (전부 RECEIVED, [3] 주문 승인/거절에서 확인 가능)")
+    print(f"시딩 완료: 주문 {len(created)}건 접수 (전부 RESERVED, [3] 주문 승인/거절에서 확인 가능)")
     print(f"주문번호 범위: {created[0]} ~ {created[-1]}")
 
 

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.models import Sample
 from app.repository import OrderRepository, SampleRepository
-from app.services import OrderService
+from app.services import OrderService, STOCK_ABUNDANT, STOCK_DEPLETED, STOCK_LOW, stock_status
 
 
 def clear_screen() -> None:
@@ -220,8 +220,8 @@ def decide_selected_order(sample_repo: SampleRepository, service: OrderService, 
     decision = input("[Y] 승인  [N] 주문 거절  [0] 뒤로 > ").strip().upper()
     if decision == "Y":
         new_status = service.decide(order.order_id, approve=True)
-        if new_status == "PRODUCTION":
-            print("재고 부족: 생산 필요(PRODUCTION) 상태로 변경되었습니다.")
+        if new_status == "PRODUCING":
+            print("재고 부족: 생산 필요(PRODUCING) 상태로 변경되었습니다.")
         else:
             print("승인 완료(CONFIRMED).")
     elif decision == "N":
@@ -239,7 +239,7 @@ def order_approval_menu(sample_repo: SampleRepository, order_repo: OrderReposito
     while True:
         clear_screen()
         print("\n===== 주문 승인/거절 =====")
-        orders = order_repo.list_all("RECEIVED")
+        orders = order_repo.list_all("RESERVED")
         page_items, page, total_pages = paginate(orders, page)
         print_order_approval_table(page_items, sample_repo)
         print(f"(페이지 {page + 1}/{total_pages})")
@@ -331,12 +331,7 @@ def release_menu(sample_repo: SampleRepository, order_repo: OrderRepository, ser
         pause()
 
 
-ORDER_VOLUME_STATUSES = ["RECEIVED", "CONFIRMED", "PRODUCTION", "RELEASE"]
-
-STOCK_FULL_CAPACITY = 1000
-STOCK_ABUNDANT_THRESHOLD = 60
-STOCK_LOW_THRESHOLD = 20
-
+ORDER_VOLUME_STATUSES = ["RESERVED", "CONFIRMED", "PRODUCING", "RELEASE"]
 
 def check_order_volume(order_repo: OrderRepository) -> None:
     orders = [o for o in order_repo.list_all() if o.status != "REJECTED"]
@@ -357,31 +352,30 @@ def check_order_volume(order_repo: OrderRepository) -> None:
     print_table(headers, rows, widths)
 
 
-def _stock_ratio_status(stock: int):
-    ratio = stock / STOCK_FULL_CAPACITY * 100
-    if ratio >= STOCK_ABUNDANT_THRESHOLD:
-        return ratio, "여유", GREEN
-    if ratio >= STOCK_LOW_THRESHOLD:
-        return ratio, "부족", ORANGE
-    return ratio, "고갈", RED
+STOCK_STATUS_COLORS = {
+    STOCK_ABUNDANT: GREEN,
+    STOCK_LOW: ORANGE,
+    STOCK_DEPLETED: RED,
+}
 
 
-def check_stock_level(sample_repo: SampleRepository) -> None:
+def check_stock_level(sample_repo: SampleRepository, service: OrderService) -> None:
     samples = sample_repo.list_all()
     if not samples:
         print("등록된 시료가 없습니다.")
         return
-    headers = ["시료명", "재고", "상태", "잔여율"]
-    widths = [20, 8, 10, 8]
+    headers = ["시료명", "재고", "상태"]
+    widths = [20, 8, 10]
     rows = []
     for s in samples:
-        ratio, label, color = _stock_ratio_status(s.stock)
-        colored_label = f"{color}{label}{RESET}"
-        rows.append([s.name, s.stock, colored_label, f"{ratio:.0f}%"])
+        pending = service.pending_order_quantity(s.sample_id)
+        label = stock_status(s.stock, pending)
+        colored_label = f"{STOCK_STATUS_COLORS[label]}{label}{RESET}"
+        rows.append([s.name, s.stock, colored_label])
     print_table(headers, rows, widths)
 
 
-def monitoring_menu(sample_repo: SampleRepository, order_repo: OrderRepository) -> None:
+def monitoring_menu(sample_repo: SampleRepository, order_repo: OrderRepository, service: OrderService) -> None:
     while True:
         clear_screen()
         print("\n===== 모니터링 =====")
@@ -390,7 +384,7 @@ def monitoring_menu(sample_repo: SampleRepository, order_repo: OrderRepository) 
             return
         action = {
             "1": lambda: check_order_volume(order_repo),
-            "2": lambda: check_stock_level(sample_repo),
+            "2": lambda: check_stock_level(sample_repo, service),
         }.get(choice)
         if action is None:
             print("[오류] 올바른 메뉴를 선택하세요.")
@@ -418,7 +412,7 @@ PRODUCTION_LINE_REFRESH_SECONDS = 0.3
 def _render_production_line(sample_repo: SampleRepository, order_repo: OrderRepository, service: OrderService) -> None:
     clear_screen()
     service.advance_production_line()
-    orders = order_repo.list_all("PRODUCTION")
+    orders = order_repo.list_all("PRODUCING")
     current = next((o for o in orders if o.production_started_at), None)
     waiting = sorted(
         (o for o in orders if not o.production_started_at),
@@ -495,7 +489,7 @@ def run(sample_repo: SampleRepository, order_repo: OrderRepository, service: Ord
         "1": lambda: sample_management_menu(sample_repo),
         "2": lambda: order_reception_menu(service),
         "3": lambda: order_approval_menu(sample_repo, order_repo, service),
-        "4": lambda: monitoring_menu(sample_repo, order_repo),
+        "4": lambda: monitoring_menu(sample_repo, order_repo, service),
         "5": lambda: production_line_menu(sample_repo, order_repo, service),
         "6": lambda: release_menu(sample_repo, order_repo, service),
     }

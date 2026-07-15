@@ -123,18 +123,18 @@ class OrderRepositoryTest(unittest.TestCase):
         self.sample_repo.create(Sample("S1", "Wafer-A", 10.0, 0.95, 100))
 
     def test_create_and_get(self):
-        self.order_repo.create(Order("O1", "S1", "ACME", 10, "RECEIVED", "2026-01-01T00:00:00"))
+        self.order_repo.create(Order("O1", "S1", "ACME", 10, "RESERVED", "2026-01-01T00:00:00"))
         order = self.order_repo.get("O1")
-        self.assertEqual(order.status, "RECEIVED")
+        self.assertEqual(order.status, "RESERVED")
 
     def test_list_all_filters_by_status(self):
-        self.order_repo.create(Order("O1", "S1", "ACME", 10, "RECEIVED", "2026-01-01T00:00:00"))
+        self.order_repo.create(Order("O1", "S1", "ACME", 10, "RESERVED", "2026-01-01T00:00:00"))
         self.order_repo.create(Order("O2", "S1", "ACME", 5, "APPROVED", "2026-01-02T00:00:00"))
-        received = self.order_repo.list_all("RECEIVED")
+        received = self.order_repo.list_all("RESERVED")
         self.assertEqual([o.order_id for o in received], ["O1"])
 
     def test_update_status(self):
-        self.order_repo.create(Order("O1", "S1", "ACME", 10, "RECEIVED", "2026-01-01T00:00:00"))
+        self.order_repo.create(Order("O1", "S1", "ACME", 10, "RESERVED", "2026-01-01T00:00:00"))
         self.order_repo.update_status("O1", "APPROVED")
         self.assertEqual(self.order_repo.get("O1").status, "APPROVED")
 
@@ -142,18 +142,18 @@ class OrderRepositoryTest(unittest.TestCase):
         self.assertEqual(self.order_repo.next_order_id("20260715"), "O-20260715-001")
 
     def test_next_order_id_increments_for_same_date(self):
-        self.order_repo.create(Order("O-20260715-001", "S1", "ACME", 1, "RECEIVED", "2026-07-15T00:00:00"))
+        self.order_repo.create(Order("O-20260715-001", "S1", "ACME", 1, "RESERVED", "2026-07-15T00:00:00"))
         self.assertEqual(self.order_repo.next_order_id("20260715"), "O-20260715-002")
 
     def test_next_order_id_is_independent_per_date(self):
-        self.order_repo.create(Order("O-20260715-001", "S1", "ACME", 1, "RECEIVED", "2026-07-15T00:00:00"))
+        self.order_repo.create(Order("O-20260715-001", "S1", "ACME", 1, "RESERVED", "2026-07-15T00:00:00"))
         self.assertEqual(self.order_repo.next_order_id("20260716"), "O-20260716-001")
 
     def test_next_production_queue_seq_starts_at_1(self):
         self.assertEqual(self.order_repo.next_production_queue_seq(), 1)
 
     def test_next_production_queue_seq_increments(self):
-        self.order_repo.create(Order("O1", "S1", "ACME", 10, "RECEIVED", "2026-01-01T00:00:00"))
+        self.order_repo.create(Order("O1", "S1", "ACME", 10, "RESERVED", "2026-01-01T00:00:00"))
         self.order_repo.set_production_queue_seq("O1", 1)
         self.assertEqual(self.order_repo.next_production_queue_seq(), 2)
 
