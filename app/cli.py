@@ -1,7 +1,9 @@
 import math
 import msvcrt
 import os
+import re
 import time
+import unicodedata
 from datetime import datetime, timedelta, timezone
 
 from app.models import Sample
@@ -28,8 +30,20 @@ def paginate(items, page: int, page_size: int = 5):
 GREEN = "\033[92m"
 ORANGE = "\033[38;5;208m"
 RED = "\033[91m"
+LIGHT_BLUE = "\033[94m"
 HEADER_BG = "\033[44m\033[97m"
 RESET = "\033[0m"
+
+_BRACKET_PATTERN = re.compile(r"\[[^\]]+\]")
+
+
+def _highlight_brackets(text: str) -> str:
+    return _BRACKET_PATTERN.sub(lambda m: f"{LIGHT_BLUE}{m.group(0)}{RESET}", text)
+
+
+def _char_width(ch: str) -> int:
+    # 한글 등 전각(East Asian Wide/Fullwidth) 문자는 터미널에서 2칸을 차지한다.
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
 
 
 def _visible_len(text) -> int:
@@ -44,7 +58,7 @@ def _visible_len(text) -> int:
             if ch == "m":
                 in_escape = False
             continue
-        length += 1
+        length += _char_width(ch)
     return length
 
 
@@ -69,10 +83,22 @@ def print_table(headers, rows, widths) -> None:
     print(border("└", "┴", "┘"))
 
 
+def print_system_status(sample_repo: SampleRepository, order_repo: OrderRepository) -> None:
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    samples = sample_repo.list_all()
+    orders = order_repo.list_all()
+    total_stock = sum(s.stock for s in samples)
+    producing_count = sum(1 for o in orders if o.status == "PRODUCING")
+    print(f"시스템 현황 : ({now} 기준)\n")
+    print(f"등록 시료 : {len(samples)}종   총 재고 {total_stock} ea")
+    print(f"전체 주문 : {len(orders)}건   생산라인 {producing_count}건 대기")
+    print("-" * 50)
+
+
 def print_menu() -> None:
     print("\n===== S-Semi 시료 주문관리 =====")
-    print("[1] 시료 관리  [2] 시료 주문  [3] 주문 승인/거절  [4] 모니터링")
-    print("[5] 생산 라인 조회  [6] 출고 처리  [0] 종료")
+    print(_highlight_brackets("[1] 시료 관리  [2] 시료 주문  [3] 주문 승인/거절  [4] 모니터링"))
+    print(_highlight_brackets("[5] 생산 라인 조회  [6] 출고 처리  [0] 종료"))
 
 
 def print_sample_table(samples) -> None:
@@ -80,7 +106,7 @@ def print_sample_table(samples) -> None:
         print("등록된 시료가 없습니다.")
         return
     headers = ["ID", "이름", "수율", "재고", "생산시간(sec/ea)"]
-    widths = [8, 20, 6, 6, 14]
+    widths = [8, 22, 6, 6, 16]
     rows = [
         [s.sample_id, s.name, s.yield_rate, s.stock, f"{s.avg_production_time * 60:.2f}"]
         for s in samples
@@ -110,7 +136,7 @@ def edit_or_delete_sample(sample_repo: SampleRepository) -> None:
     sample = sample_repo.get(sample_id)
     print(f"현재 값: 이름={sample.name}, 생산시간={sample.avg_production_time}, "
           f"수율={sample.yield_rate}, 재고={sample.stock}")
-    action = input("[1] 수정  [2] 삭제 > ").strip()
+    action = input(_highlight_brackets("[1] 수정  [2] 삭제 > ")).strip()
     if action == "1":
         name = input(f"이름(엔터=유지: {sample.name}) > ").strip() or sample.name
         avg_time_raw = input(f"평균 생산시간(엔터=유지: {sample.avg_production_time}) > ").strip()
@@ -137,7 +163,7 @@ def sample_management_menu(sample_repo: SampleRepository) -> None:
         page_items, page, total_pages = paginate(samples, page)
         print_sample_table(page_items)
         print(f"(페이지 {page + 1}/{total_pages})")
-        choice = input("[N] 다음  [B] 이전  [1] 검색  [2] 등록  [3] 수정/삭제  [0] 뒤로 > ").strip().upper()
+        choice = input(_highlight_brackets("[N] 다음  [B] 이전  [1] 검색  [2] 등록  [3] 수정/삭제  [0] 뒤로 > ")).strip().upper()
         if choice == "0":
             return
         if choice == "N":
@@ -182,7 +208,7 @@ def order_reception_menu(service: OrderService) -> None:
     while True:
         clear_screen()
         print("\n===== 시료 주문 =====")
-        choice = input("[1] 주문 접수  [0] 뒤로 > ").strip()
+        choice = input(_highlight_brackets("[1] 주문 접수  [0] 뒤로 > ")).strip()
         if choice == "0":
             return
         if choice != "1":
@@ -201,7 +227,7 @@ def print_order_approval_table(orders, sample_repo: SampleRepository) -> None:
         print("승인/거절 대기 중인 주문이 없습니다.")
         return
     headers = ["번호", "주문번호", "고객", "시료", "수량", "상태"]
-    widths = [4, 14, 12, 20, 6, 10]
+    widths = [4, 14, 12, 22, 6, 10]
     rows = []
     for i, o in enumerate(orders, start=1):
         try:
@@ -217,7 +243,7 @@ def decide_selected_order(sample_repo: SampleRepository, service: OrderService, 
     shortage = sample.stock - order.quantity
     shortage_display = f"\033[91m{shortage}\033[0m" if shortage < 0 else str(shortage)
     print(f"시료={sample.name}, 현재 재고={sample.stock}, 주문 수량={order.quantity}, 부족분={shortage_display}")
-    decision = input("[Y] 승인  [N] 주문 거절  [0] 뒤로 > ").strip().upper()
+    decision = input(_highlight_brackets("[Y] 승인  [N] 주문 거절  [0] 뒤로 > ")).strip().upper()
     if decision == "Y":
         new_status = service.decide(order.order_id, approve=True)
         if new_status == "PRODUCING":
@@ -243,7 +269,7 @@ def order_approval_menu(sample_repo: SampleRepository, order_repo: OrderReposito
         page_items, page, total_pages = paginate(orders, page)
         print_order_approval_table(page_items, sample_repo)
         print(f"(페이지 {page + 1}/{total_pages})")
-        choice = input("[N] 다음  [B] 이전  번호 입력(승인/거절)  [0] 뒤로 > ").strip().upper()
+        choice = input(_highlight_brackets("[N] 다음  [B] 이전  번호 입력(승인/거절)  [0] 뒤로 > ")).strip().upper()
         if choice == "0":
             return
         if choice == "N":
@@ -280,7 +306,7 @@ def print_release_table(orders, sample_repo: SampleRepository) -> None:
         print("출고 가능한 주문이 없습니다.")
         return
     headers = ["번호", "주문번호", "고객", "시료", "수량"]
-    widths = [4, 14, 12, 20, 6]
+    widths = [4, 14, 12, 22, 6]
     rows = []
     for i, o in enumerate(orders, start=1):
         try:
@@ -300,7 +326,7 @@ def release_menu(sample_repo: SampleRepository, order_repo: OrderRepository, ser
         page_items, page, total_pages = paginate(orders, page)
         print_release_table(page_items, sample_repo)
         print(f"(페이지 {page + 1}/{total_pages})")
-        choice = input("[N] 다음  [B] 이전  번호 입력(출고)  [0] 뒤로 > ").strip().upper()
+        choice = input(_highlight_brackets("[N] 다음  [B] 이전  번호 입력(출고)  [0] 뒤로 > ")).strip().upper()
         if choice == "0":
             return
         if choice == "N":
@@ -379,7 +405,7 @@ def monitoring_menu(sample_repo: SampleRepository, order_repo: OrderRepository, 
     while True:
         clear_screen()
         print("\n===== 모니터링 =====")
-        choice = input("[1] 주문량 확인  [2] 재고량 확인  [0] 뒤로 > ").strip()
+        choice = input(_highlight_brackets("[1] 주문량 확인  [2] 재고량 확인  [0] 뒤로 > ")).strip()
         if choice == "0":
             return
         action = {
@@ -450,7 +476,7 @@ def _render_production_line(sample_repo: SampleRepository, order_repo: OrderRepo
         print("  대기 중인 주문이 없습니다.")
     else:
         headers = ["순서", "주문번호", "시료", "주문량", "부족분", "실생산량", "예상 완료"]
-        widths = [4, 14, 20, 6, 6, 8, 16]
+        widths = [4, 14, 22, 6, 6, 8, 16]
         rows = []
         cumulative_start = expected_completion or datetime.now(timezone.utc)
         for i, o in enumerate(waiting, start=1):
@@ -471,7 +497,7 @@ def _render_production_line(sample_repo: SampleRepository, order_repo: OrderRepo
             cumulative_start = expected
         print_table(headers, rows, widths)
 
-    print("\n[0] 뒤로  (실시간 자동 갱신 중...)")
+    print(_highlight_brackets("\n[0] 뒤로  (실시간 자동 갱신 중...)"))
 
 
 def production_line_menu(sample_repo: SampleRepository, order_repo: OrderRepository, service: OrderService) -> None:
@@ -495,6 +521,7 @@ def run(sample_repo: SampleRepository, order_repo: OrderRepository, service: Ord
     }
     while True:
         clear_screen()
+        print_system_status(sample_repo, order_repo)
         print_menu()
         choice = input("선택 > ").strip()
         if choice == "0":
