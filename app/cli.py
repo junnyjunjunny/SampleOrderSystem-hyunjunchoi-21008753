@@ -1,5 +1,6 @@
 import math
 import os
+from datetime import datetime, timedelta, timezone
 
 from app.models import Sample
 from app.repository import OrderRepository, SampleRepository
@@ -76,9 +77,12 @@ def print_sample_table(samples) -> None:
     if not samples:
         print("등록된 시료가 없습니다.")
         return
-    headers = ["ID", "이름", "수율", "재고"]
-    widths = [8, 20, 6, 6]
-    rows = [[s.sample_id, s.name, s.yield_rate, s.stock] for s in samples]
+    headers = ["ID", "이름", "수율", "재고", "생산시간(sec/ea)"]
+    widths = [8, 20, 6, 6, 14]
+    rows = [
+        [s.sample_id, s.name, s.yield_rate, s.stock, f"{s.avg_production_time * 60:.2f}"]
+        for s in samples
+    ]
     print_table(headers, rows, widths)
 
 
@@ -347,8 +351,79 @@ def monitoring_menu(sample_repo: SampleRepository, order_repo: OrderRepository) 
         pause()
 
 
-def production_line_menu() -> None:
-    print("생산 라인 조회는 아직 개발되지 않았습니다.")
+def _format_local(iso_str: str) -> str:
+    return datetime.fromisoformat(iso_str).astimezone().strftime("%Y-%m-%d %H:%M")
+
+
+def _gauge(progress_pct: float, width: int = 20) -> str:
+    filled = int(round(width * min(100, max(0, progress_pct)) / 100))
+    return "[" + "#" * filled + "-" * (width - filled) + "]"
+
+
+def production_line_menu(sample_repo: SampleRepository, order_repo: OrderRepository, service: OrderService) -> None:
+    clear_screen()
+    service.advance_production_line()
+    orders = order_repo.list_all("PRODUCTION")
+    current = next((o for o in orders if o.production_started_at), None)
+    waiting = sorted((o for o in orders if not o.production_started_at), key=lambda o: o.created_at)
+
+    print("\n===== 생산 라인 조회 =====")
+    print(f"생산라인 1 | 현재 상태: {'RUN' if current else 'STOP'}\n")
+
+    print("현재 처리 중")
+    expected_completion = None
+    if current is None:
+        print("  현재 처리 중인 주문이 없습니다.")
+    else:
+        try:
+            sample = sample_repo.get(current.sample_id)
+        except KeyError:
+            sample = None
+        sample_name = sample.name if sample else "(삭제된 시료)"
+        production_quantity = current.production_quantity or 0
+        shortage = round(production_quantity * sample.yield_rate) if sample else production_quantity
+        total_minutes = production_quantity * sample.avg_production_time if sample else 0
+        started = datetime.fromisoformat(current.production_started_at)
+        elapsed_minutes = (datetime.now(timezone.utc) - started).total_seconds() / 60
+        progress = min(100, elapsed_minutes / total_minutes * 100) if total_minutes > 0 else 100
+        expected_completion = started + timedelta(minutes=total_minutes)
+        avg_time_display = f"{sample.avg_production_time:.2f} min/ea" if sample else "-"
+        print(f"  주문번호: {current.order_id}")
+        print(f"  시료: {sample_name} (평균 생산시간 {avg_time_display})")
+        print(f"  주문량: {current.quantity}   재고: {sample.stock if sample else '-'}   부족: {shortage}   실 생산량: {production_quantity}")
+        print(f"  진행: {_gauge(progress)} {progress:.0f}%   완료 예정: {_format_local(expected_completion.isoformat())}")
+
+    print("\n대기 중인 주문")
+    if not waiting:
+        print("  대기 중인 주문이 없습니다.")
+    else:
+        headers = ["순서", "주문번호", "시료", "주문량", "부족분", "실생산량", "예상 완료"]
+        widths = [4, 14, 20, 6, 6, 8, 16]
+        rows = []
+        cumulative_start = expected_completion or datetime.now(timezone.utc)
+        for i, o in enumerate(waiting, start=1):
+            try:
+                sample = sample_repo.get(o.sample_id)
+                sample_name = sample.name
+                avg_time = sample.avg_production_time
+                yield_rate = sample.yield_rate
+            except KeyError:
+                sample_name = "(삭제된 시료)"
+                avg_time = 0
+                yield_rate = 1
+            production_quantity = o.production_quantity or 0
+            shortage = round(production_quantity * yield_rate)
+            total_minutes = production_quantity * avg_time
+            expected = cumulative_start + timedelta(minutes=total_minutes)
+            rows.append([i, o.order_id, sample_name, o.quantity, shortage, production_quantity, _format_local(expected.isoformat())])
+            cumulative_start = expected
+        print_table(headers, rows, widths)
+
+    while True:
+        choice = input("\n[0] 뒤로 > ").strip()
+        if choice == "0":
+            return
+        print("[오류] 올바른 메뉴를 선택하세요.")
 
 
 def run(sample_repo: SampleRepository, order_repo: OrderRepository, service: OrderService) -> None:
@@ -357,7 +432,7 @@ def run(sample_repo: SampleRepository, order_repo: OrderRepository, service: Ord
         "2": lambda: order_reception_menu(service),
         "3": lambda: order_approval_menu(sample_repo, order_repo, service),
         "4": lambda: monitoring_menu(sample_repo, order_repo),
-        "5": lambda: production_line_menu(),
+        "5": lambda: production_line_menu(sample_repo, order_repo, service),
         "6": lambda: ship_order(service),
     }
     while True:
@@ -376,5 +451,5 @@ def run(sample_repo: SampleRepository, order_repo: OrderRepository, service: Ord
             action()
         except (ValueError, KeyError) as exc:
             print(f"[오류] {exc}")
-        if choice not in ("1", "2", "3", "4"):
+        if choice not in ("1", "2", "3", "4", "5"):
             pause()

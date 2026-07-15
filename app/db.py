@@ -18,9 +18,20 @@ CREATE TABLE IF NOT EXISTS orders (
     customer_name TEXT NOT NULL,
     quantity INTEGER NOT NULL,
     status TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    production_quantity INTEGER,
+    production_started_at TEXT
 );
 """
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(orders)")}
+    if "production_quantity" not in existing_columns:
+        conn.execute("ALTER TABLE orders ADD COLUMN production_quantity INTEGER")
+    if "production_started_at" not in existing_columns:
+        conn.execute("ALTER TABLE orders ADD COLUMN production_started_at TEXT")
+    conn.commit()
 
 
 def get_connection(db_path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
@@ -29,4 +40,5 @@ def get_connection(db_path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON;")
     conn.executescript(SCHEMA)
     conn.commit()
+    _migrate(conn)
     return conn

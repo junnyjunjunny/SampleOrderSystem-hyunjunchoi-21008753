@@ -1,3 +1,4 @@
+import math
 from datetime import datetime, timezone
 
 from app.models import CONFIRMED, PRODUCTION, REJECTED, RECEIVED, RELEASE, Order
@@ -37,9 +38,15 @@ class OrderService:
             self._transition(order_id, REJECTED)
             return REJECTED
         sample = self.sample_repo.get(order.sample_id)
-        new_status = CONFIRMED if sample.stock >= order.quantity else PRODUCTION
-        self._transition(order_id, new_status)
-        return new_status
+        if sample.stock >= order.quantity:
+            self._transition(order_id, CONFIRMED)
+            return CONFIRMED
+        shortage = order.quantity - sample.stock
+        production_quantity = math.ceil(shortage / sample.yield_rate)
+        self.order_repo.set_production_quantity(order_id, production_quantity)
+        self._transition(order_id, PRODUCTION)
+        self.advance_production_line()
+        return PRODUCTION
 
     def complete_production(self, order_id: str) -> None:
         order = self.order_repo.get(order_id)
@@ -47,7 +54,30 @@ class OrderService:
             raise ValueError(f"Cannot complete production for order {order_id} from status {order.status}")
         sample = self.sample_repo.get(order.sample_id)
         self._transition(order_id, CONFIRMED)
-        self.sample_repo.update_stock(sample.sample_id, sample.stock + order.quantity)
+        self.sample_repo.update_stock(sample.sample_id, sample.stock + order.production_quantity)
+
+    def advance_production_line(self) -> None:
+        orders = self.order_repo.list_all(PRODUCTION)
+        current = next((o for o in orders if o.production_started_at), None)
+        if current is not None:
+            sample = self.sample_repo.get(current.sample_id)
+            total_minutes = current.production_quantity * sample.avg_production_time
+            started = datetime.fromisoformat(current.production_started_at)
+            elapsed_minutes = (datetime.now(timezone.utc) - started).total_seconds() / 60
+            if elapsed_minutes >= total_minutes:
+                self.complete_production(current.order_id)
+                orders = self.order_repo.list_all(PRODUCTION)
+                current = None
+        if current is None:
+            waiting = sorted(orders, key=lambda o: o.created_at)
+            if waiting:
+                next_order = waiting[0]
+                if next_order.production_quantity is None:
+                    sample = self.sample_repo.get(next_order.sample_id)
+                    shortage = max(0, next_order.quantity - sample.stock)
+                    fallback_quantity = math.ceil(shortage / sample.yield_rate) if shortage > 0 else next_order.quantity
+                    self.order_repo.set_production_quantity(next_order.order_id, fallback_quantity)
+                self.order_repo.set_production_started_at(next_order.order_id, datetime.now(timezone.utc).isoformat())
 
     def ship(self, order_id: str) -> None:
         order = self.order_repo.get(order_id)

@@ -29,6 +29,8 @@
 | quantity | int | 주문 수량 |
 | status | str | 주문 상태 |
 | created_at | str | 접수 시각(ISO) |
+| production_quantity | int, nullable | 실 생산량(`ceil(부족분/수율)`). `PRODUCTION` 전이 시 결정 |
+| production_started_at | str, nullable | 생산 라인에서 "현재 처리 중"이 된 시각(ISO, UTC). 단일 생산 라인이라 한 번에 하나의 주문만 값을 가짐 |
 
 ### 주문 상태 흐름
 
@@ -44,7 +46,7 @@ RECEIVED --승인(재고 충분)--> CONFIRMED --출고--> RELEASE
 - 상태 전이는 `OrderService`가 검증한다(허용되지 않는 전이는 `ValueError`).
 - 시료 주문(2번) 메뉴는 접수만 담당하며 접수된 주문은 `RECEIVED`로 저장되고 끝난다. 승인/거절 판단은 전적으로 3번 메뉴에서 이후에 진행한다.
 - 3번(주문 승인/거절) 메뉴에서 승인(`Y`)을 선택하면, 그 시점의 재고와 주문 수량을 비교해 자동으로 갈린다: 재고가 충분하면 `CONFIRMED`, 부족하면 `PRODUCTION`. 거절(`N`)은 바로 `REJECTED`.
-- `PRODUCTION`은 향후 5번(생산 라인 조회) 메뉴가 담당할 자동 생산 로직으로 `CONFIRMED`로 전이하고, 그때 부족했던 만큼 재고를 채운다(`stock += quantity`). 시료의 `avg_production_time`에 따라 시간이 지나면 자동으로 생산되는 방식으로 설계 예정(`docs/05-생산라인조회.md` 참고, 아직 미구현). `OrderService.complete_production`는 이 로직의 기반이 될 API로 이미 존재한다.
+- `PRODUCTION`은 5번(생산 라인 조회) 화면 진입마다 실행되는 `OrderService.advance_production_line()`이 시간 경과에 따라 자동으로 `CONFIRMED`로 전이시키고, 그때 `production_quantity`(실 생산량, 수율 반영)만큼 재고를 채운다. 생산 라인은 1개(단일 라인)라 한 번에 하나의 주문만 처리되며, 나머지는 대기열에서 순서를 기다린다. 자세한 계산식은 `docs/05-생산라인조회.md` 참고.
 - `CONFIRMED`에서 6번(출고 처리) 메뉴로 `RELEASE`로 전이할 때 재고를 주문 수량만큼 차감한다.
 
 ## 기능 범위
@@ -53,12 +55,10 @@ RECEIVED --승인(재고 충분)--> CONFIRMED --출고--> RELEASE
 - 시료 등록 / 조회 / 검색(ID·이름 대소문자 무시 부분일치) / 수정 / 삭제
 - 시료 주문 접수
 - 주문 승인 / 거절(재고에 따라 `CONFIRMED`/`PRODUCTION` 자동 분기)
-- 모니터링(주문량 확인) / 출고 처리
+- 모니터링(주문량/재고량 확인) / 생산 라인 조회(자동 생산 진행) / 출고 처리
 
 ### 다음 단계로 미룸
-- 모니터링 재고량 확인 등 추가 하위 메뉴
 - 더미 데이터 자동 시딩 — DummyDataGenerator PoC 연계
-- 생산 라인 조회 — `PRODUCTION` 주문의 자동 생산 진행 상황 조회 및 완료 처리(시료 `avg_production_time` 기반 시간 경과 자동화)
 
 ## 아키텍처
 

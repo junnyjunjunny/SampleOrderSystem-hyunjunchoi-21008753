@@ -1,5 +1,6 @@
 import sqlite3
 import unittest
+from datetime import datetime, timedelta, timezone
 
 from app.db import SCHEMA
 from app.models import Order, Sample
@@ -57,10 +58,11 @@ class OrderServiceTest(unittest.TestCase):
 
     def test_complete_production_confirms_and_restocks(self):
         self.order_repo.create(Order("O2", "S1", "ACME", 100, "RECEIVED", "2026-01-01T00:00:00"))
-        self.service.decide("O2", approve=True)  # -> PRODUCTION (재고 20 < 100)
+        self.service.decide("O2", approve=True)  # -> PRODUCTION (재고 20 < 100, 부족분 80, 수율 0.95 -> 실생산량 85)
+        self.assertEqual(self.order_repo.get("O2").production_quantity, 85)
         self.service.complete_production("O2")
         self.assertEqual(self.order_repo.get("O2").status, "CONFIRMED")
-        self.assertEqual(self.sample_repo.get("S1").stock, 120)
+        self.assertEqual(self.sample_repo.get("S1").stock, 105)  # 20 + 85(production_quantity), not order.quantity(100)
 
     def test_complete_production_without_production_status_raises(self):
         with self.assertRaises(ValueError):
@@ -75,6 +77,60 @@ class OrderServiceTest(unittest.TestCase):
     def test_ship_without_confirmation_raises(self):
         with self.assertRaises(ValueError):
             self.service.ship("O1")  # 아직 RECEIVED
+
+
+class OrderServiceProductionLineTest(unittest.TestCase):
+    def setUp(self):
+        self.conn = make_conn()
+        self.sample_repo = SampleRepository(self.conn)
+        self.order_repo = OrderRepository(self.conn)
+        self.service = OrderService(self.order_repo, self.sample_repo)
+        # avg_production_time=2.0, yield_rate=1.0 -> production_quantity == shortage, total_minutes == shortage * 2
+        self.sample_repo.create(Sample("S1", "Wafer-A", 2.0, 1.0, 0))
+
+    def test_decide_immediately_starts_production_when_line_idle(self):
+        order_id = self.service.receive_order("S1", "ACME", 10)
+        self.service.decide(order_id, approve=True)  # -> PRODUCTION, production_quantity=10, total=20min
+        order = self.order_repo.get(order_id)
+        self.assertIsNotNone(order.production_started_at)
+
+    def test_advance_does_not_complete_before_elapsed_time(self):
+        order_id = self.service.receive_order("S1", "ACME", 10)
+        self.service.decide(order_id, approve=True)
+        self.service.advance_production_line()
+        self.assertEqual(self.order_repo.get(order_id).status, "PRODUCTION")
+
+    def test_advance_completes_after_elapsed_time(self):
+        order_id = self.service.receive_order("S1", "ACME", 10)
+        self.service.decide(order_id, approve=True)  # production_quantity=10, total=20min
+        started = datetime.now(timezone.utc) - timedelta(minutes=21)
+        self.order_repo.set_production_started_at(order_id, started.isoformat())
+        self.service.advance_production_line()
+        order = self.order_repo.get(order_id)
+        self.assertEqual(order.status, "CONFIRMED")
+        self.assertEqual(self.sample_repo.get("S1").stock, 10)
+
+    def test_advance_starts_next_waiting_order_after_current_completes(self):
+        order_a = self.service.receive_order("S1", "ACME", 10)
+        self.service.decide(order_a, approve=True)  # starts immediately (line idle)
+        order_b = self.service.receive_order("S1", "ACME", 5)
+        self.service.decide(order_b, approve=True)  # waits (line busy with A)
+        self.assertIsNone(self.order_repo.get(order_b).production_started_at)
+
+        started = datetime.now(timezone.utc) - timedelta(minutes=21)
+        self.order_repo.set_production_started_at(order_a, started.isoformat())
+        self.service.advance_production_line()
+
+        self.assertEqual(self.order_repo.get(order_a).status, "CONFIRMED")
+        self.assertIsNotNone(self.order_repo.get(order_b).production_started_at)
+        self.assertEqual(self.order_repo.get(order_b).status, "PRODUCTION")
+
+    def test_advance_backfills_legacy_order_missing_production_quantity(self):
+        self.order_repo.create(Order("O-LEGACY", "S1", "ACME", 15, "PRODUCTION", "2026-01-01T00:00:00"))
+        self.service.advance_production_line()
+        order = self.order_repo.get("O-LEGACY")
+        self.assertEqual(order.production_quantity, 15)  # shortage=15-0=15, yield=1.0 -> 15
+        self.assertIsNotNone(order.production_started_at)
 
 
 class OrderServiceReceiveOrderTest(unittest.TestCase):

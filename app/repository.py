@@ -125,3 +125,19 @@ class OrderRepository:
         self.conn.commit()
         if cursor.rowcount == 0:
             raise KeyError(f"Order not found: {order_id}")
+
+    def set_production_quantity(self, order_id: str, production_quantity: int) -> None:
+        cursor = self.conn.execute(
+            "UPDATE orders SET production_quantity = ? WHERE order_id = ?", (production_quantity, order_id)
+        )
+        self.conn.commit()
+        if cursor.rowcount == 0:
+            raise KeyError(f"Order not found: {order_id}")
+
+    def set_production_started_at(self, order_id: str, started_at: str) -> None:
+        cursor = self.conn.execute(
+            "UPDATE orders SET production_started_at = ? WHERE order_id = ?", (started_at, order_id)
+        )
+        self.conn.commit()
+        if cursor.rowcount == 0:
+            raise KeyError(f"Order not found: {order_id}")
