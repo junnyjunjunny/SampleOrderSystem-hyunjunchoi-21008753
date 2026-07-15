@@ -74,6 +74,19 @@ python main.py
 
 ## Harness (Claude Code 운영)
 
+이 프로젝트의 Harness는 "AI가 만든 코드를 사람이 리뷰하기 전에, AI 스스로 다각도로 검증해 결과를 넘긴다"는 원칙으로 설계했다. 그 검증 관점을 4개로 나눠 `.claude/agents/`에 SubAgent로 정의해뒀다:
+
+| SubAgent | 관점 |
+|---|---|
+| `doc-consistency-verifier` | PRD.md/README.md/CLAUDE.md가 실제 구현과 어긋나지 않는가 |
+| `ai-action-executor` | Plan.md에 없는 범위까지 손대지 않고 계획대로만 구현했는가 |
+| `test-verify` | 테스트가 실패 케이스를 포함해 충분히 커버하는가 |
+| `compliance-verify` | 작업 진행 방식/코딩 컨벤션/커밋 규칙을 지켰는가 |
+
+초기에는 이 4개를 사이클마다 실제로 병렬 SubAgent 호출로 돌렸으나, 사이클당 소요 시간이 크게 늘어나는 문제가 있어 지금은 **AI(주 스레드)가 같은 4개 관점을 직접, 한 번에 훑는 방식**(아래 "가벼운 자체 점검")으로 완화해 운영한다. `.claude/agents/`의 정의 파일 4개는 삭제하지 않고 각 관점의 체크리스트로 계속 참고하되, 실제 SubAgent 병렬 호출은 사용자가 명시적으로 요청할 때만 한다.
+
+> **환경 참고**: `.claude/agents/`의 SubAgent는 Claude Code가 이 폴더(`SampleOrderSystem-hyunjunchoi-21008753`)를 프로젝트 루트로 인식하고 실행될 때 Agent 타입으로 잡힌다. 상위 폴더를 루트로 열어 작업하는 세션에서는 이 4개가 Agent 타입 목록에 나타나지 않을 수 있으니, SubAgent를 실제로 호출하려면 이 폴더 자체를 열어야 한다.
+
 - 코드 변경 후에는 `python -m unittest discover tests`로 검증한다.
 - 도메인 규칙을 바꾸는 변경은 PRD.md의 해당 표/흐름도를 함께 갱신한다.
 - 커밋 전 `/code-review` 또는 동등한 리뷰로 CleanCode 위반(불필요한 추상화, 미사용 코드, 방어적 코드 과다 등) 여부를 확인한다.
