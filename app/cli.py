@@ -8,6 +8,7 @@ from app.services import OrderService
 
 def clear_screen() -> None:
     os.system("cls")
+    os.system("")  # enable ANSI escape processing on Windows consoles
 
 
 def pause() -> None:
@@ -23,8 +24,8 @@ def paginate(items, page: int, page_size: int = 5):
 
 def print_menu() -> None:
     print("\n===== S-Semi 시료 주문관리 =====")
-    print("[1] 시료 관리  [2] 시료 주문  [3] 주문 승인  [4] 주문 거절")
-    print("[5] 생산 시작  [6] 출고  [7] 주문 목록  [0] 종료")
+    print("[1] 시료 관리  [2] 시료 주문  [3] 주문 승인/거절  [4] 생산 완료")
+    print("[5] 출고  [6] 주문 목록  [0] 종료")
 
 
 def print_sample_table(samples) -> None:
@@ -144,22 +145,86 @@ def order_reception_menu(service: OrderService) -> None:
         pause()
 
 
-def approve_order(service: OrderService) -> None:
-    order_id = input("승인할 주문 ID > ").strip()
-    service.approve(order_id)
-    print("승인 완료.")
+def print_order_approval_table(orders, sample_repo: SampleRepository) -> None:
+    if not orders:
+        print("승인/거절 대기 중인 주문이 없습니다.")
+        return
+    print(f"{'번호':<4}{'주문번호':<14}{'고객':<12}{'시료':<20}{'수량':<6}{'상태':<10}")
+    for i, o in enumerate(orders, start=1):
+        try:
+            sample_name = sample_repo.get(o.sample_id).name
+        except KeyError:
+            sample_name = "(삭제된 시료)"
+        print(f"{i:<4}{o.order_id:<14}{o.customer_name:<12}{sample_name:<20}{o.quantity:<6}{o.status:<10}")
 
 
-def reject_order(service: OrderService) -> None:
-    order_id = input("거절할 주문 ID > ").strip()
-    service.reject(order_id)
-    print("거절 완료.")
+def decide_selected_order(sample_repo: SampleRepository, service: OrderService, order) -> bool:
+    sample = sample_repo.get(order.sample_id)
+    shortage = sample.stock - order.quantity
+    shortage_display = f"\033[91m{shortage}\033[0m" if shortage < 0 else str(shortage)
+    print(f"시료={sample.name}, 현재 재고={sample.stock}, 주문 수량={order.quantity}, 부족분={shortage_display}")
+    decision = input("[Y] 승인  [N] 주문 거절  [0] 뒤로 > ").strip().upper()
+    if decision == "Y":
+        new_status = service.decide(order.order_id, approve=True)
+        if new_status == "PRODUCTION":
+            print("재고 부족: 생산 필요(PRODUCTION) 상태로 변경되었습니다.")
+        else:
+            print("승인 완료(CONFIRMED).")
+    elif decision == "N":
+        service.decide(order.order_id, approve=False)
+        print("거절 완료(REJECTED).")
+    elif decision == "0":
+        return False
+    else:
+        raise ValueError(f"잘못된 항목: {decision}")
+    return True
 
 
-def start_production(service: OrderService) -> None:
-    order_id = input("생산 시작할 주문 ID > ").strip()
-    service.start_production(order_id)
-    print("생산 시작 처리 완료.")
+def order_approval_menu(sample_repo: SampleRepository, order_repo: OrderRepository, service: OrderService) -> None:
+    page = 0
+    while True:
+        clear_screen()
+        print("\n===== 주문 승인/거절 =====")
+        orders = order_repo.list_all("RECEIVED")
+        page_items, page, total_pages = paginate(orders, page)
+        print_order_approval_table(page_items, sample_repo)
+        print(f"(페이지 {page + 1}/{total_pages})")
+        choice = input("[N] 다음  [B] 이전  번호 입력(승인/거절)  [0] 뒤로 > ").strip().upper()
+        if choice == "0":
+            return
+        if choice == "N":
+            if page + 1 >= total_pages:
+                print("마지막 페이지입니다.")
+                pause()
+            else:
+                page += 1
+            continue
+        if choice == "B":
+            if page == 0:
+                print("첫 페이지입니다.")
+                pause()
+            else:
+                page -= 1
+            continue
+        try:
+            if not choice.isdigit():
+                raise ValueError(f"잘못된 입력입니다: {choice}")
+            index = int(choice)
+            if not 1 <= index <= len(page_items):
+                raise ValueError(f"올바른 번호를 입력하세요 (1~{len(page_items)})")
+            decided = decide_selected_order(sample_repo, service, page_items[index - 1])
+        except (ValueError, KeyError) as exc:
+            print(f"[오류] {exc}")
+            pause()
+            continue
+        if decided:
+            pause()
+
+
+def complete_production_order(service: OrderService) -> None:
+    order_id = input("생산 완료 처리할 주문번호 > ").strip()
+    service.complete_production(order_id)
+    print("생산 완료 처리되었습니다.")
 
 
 def ship_order(service: OrderService) -> None:
@@ -183,11 +248,10 @@ def run(sample_repo: SampleRepository, order_repo: OrderRepository, service: Ord
     actions = {
         "1": lambda: sample_management_menu(sample_repo),
         "2": lambda: order_reception_menu(service),
-        "3": lambda: approve_order(service),
-        "4": lambda: reject_order(service),
-        "5": lambda: start_production(service),
-        "6": lambda: ship_order(service),
-        "7": lambda: list_orders(order_repo),
+        "3": lambda: order_approval_menu(sample_repo, order_repo, service),
+        "4": lambda: complete_production_order(service),
+        "5": lambda: ship_order(service),
+        "6": lambda: list_orders(order_repo),
     }
     while True:
         clear_screen()
@@ -205,5 +269,5 @@ def run(sample_repo: SampleRepository, order_repo: OrderRepository, service: Ord
             action()
         except (ValueError, KeyError) as exc:
             print(f"[오류] {exc}")
-        if choice not in ("1", "2"):
+        if choice not in ("1", "2", "3"):
             pause()

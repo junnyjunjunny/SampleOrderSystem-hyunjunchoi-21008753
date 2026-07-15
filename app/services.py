@@ -1,12 +1,12 @@
 from datetime import datetime, timezone
 
-from app.models import APPROVED, IN_PRODUCTION, REJECTED, RECEIVED, SHIPPED, Order
+from app.models import CONFIRMED, PRODUCTION, REJECTED, RECEIVED, SHIPPED, Order
 from app.repository import OrderRepository, SampleRepository
 
 ALLOWED_TRANSITIONS = {
-    RECEIVED: {APPROVED, REJECTED},
-    APPROVED: {IN_PRODUCTION},
-    IN_PRODUCTION: {SHIPPED},
+    RECEIVED: {CONFIRMED, PRODUCTION, REJECTED},
+    PRODUCTION: {CONFIRMED},
+    CONFIRMED: {SHIPPED},
 }
 
 
@@ -29,18 +29,25 @@ class OrderService:
         self.order_repo.create(order)
         return order_id
 
-    def approve(self, order_id: str) -> None:
+    def decide(self, order_id: str, approve: bool) -> str:
         order = self.order_repo.get(order_id)
+        if order.status != RECEIVED:
+            raise ValueError(f"Cannot decide order {order_id} from status {order.status}")
+        if not approve:
+            self._transition(order_id, REJECTED)
+            return REJECTED
         sample = self.sample_repo.get(order.sample_id)
-        if sample.stock < order.quantity:
-            raise ValueError(f"Insufficient stock for sample {sample.sample_id}: have {sample.stock}, need {order.quantity}")
-        self._transition(order_id, APPROVED)
+        new_status = CONFIRMED if sample.stock >= order.quantity else PRODUCTION
+        self._transition(order_id, new_status)
+        return new_status
 
-    def reject(self, order_id: str) -> None:
-        self._transition(order_id, REJECTED)
-
-    def start_production(self, order_id: str) -> None:
-        self._transition(order_id, IN_PRODUCTION)
+    def complete_production(self, order_id: str) -> None:
+        order = self.order_repo.get(order_id)
+        if order.status != PRODUCTION:
+            raise ValueError(f"Cannot complete production for order {order_id} from status {order.status}")
+        sample = self.sample_repo.get(order.sample_id)
+        self._transition(order_id, CONFIRMED)
+        self.sample_repo.update_stock(sample.sample_id, sample.stock + order.quantity)
 
     def ship(self, order_id: str) -> None:
         order = self.order_repo.get(order_id)

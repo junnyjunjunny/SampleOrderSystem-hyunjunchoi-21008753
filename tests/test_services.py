@@ -23,27 +23,58 @@ class OrderServiceTest(unittest.TestCase):
         self.sample_repo.create(Sample("S1", "Wafer-A", 10.0, 0.95, 20))
         self.order_repo.create(Order("O1", "S1", "ACME", 10, "RECEIVED", "2026-01-01T00:00:00"))
 
-    def test_approve_then_ship_deducts_stock(self):
-        self.service.approve("O1")
-        self.service.start_production("O1")
+    def test_decide_approve_with_sufficient_stock_confirms(self):
+        status = self.service.decide("O1", approve=True)
+        self.assertEqual(status, "CONFIRMED")
+        self.assertEqual(self.order_repo.get("O1").status, "CONFIRMED")
+
+    def test_decide_approve_with_insufficient_stock_moves_to_production(self):
+        self.order_repo.create(Order("O2", "S1", "ACME", 100, "RECEIVED", "2026-01-01T00:00:00"))
+        status = self.service.decide("O2", approve=True)
+        self.assertEqual(status, "PRODUCTION")
+        self.assertEqual(self.order_repo.get("O2").status, "PRODUCTION")
+
+    def test_decide_reject_moves_to_rejected(self):
+        status = self.service.decide("O1", approve=False)
+        self.assertEqual(status, "REJECTED")
+        self.assertEqual(self.order_repo.get("O1").status, "REJECTED")
+
+    def test_decide_missing_order_raises(self):
+        with self.assertRaises(KeyError):
+            self.service.decide("NOPE", approve=True)
+
+    def test_decide_on_production_order_raises(self):
+        self.order_repo.create(Order("O2", "S1", "ACME", 100, "RECEIVED", "2026-01-01T00:00:00"))
+        self.service.decide("O2", approve=True)  # -> PRODUCTION (재고 20 < 100)
+        self.sample_repo.update_stock("S1", 200)  # 재고가 나중에 충분해지더라도
+        with self.assertRaises(ValueError):
+            self.service.decide("O2", approve=True)  # decide()로 다시 결정할 수 없음 (complete_production만 가능)
+
+    def test_decide_already_decided_raises(self):
+        self.service.decide("O1", approve=False)
+        with self.assertRaises(ValueError):
+            self.service.decide("O1", approve=True)
+
+    def test_complete_production_confirms_and_restocks(self):
+        self.order_repo.create(Order("O2", "S1", "ACME", 100, "RECEIVED", "2026-01-01T00:00:00"))
+        self.service.decide("O2", approve=True)  # -> PRODUCTION (재고 20 < 100)
+        self.service.complete_production("O2")
+        self.assertEqual(self.order_repo.get("O2").status, "CONFIRMED")
+        self.assertEqual(self.sample_repo.get("S1").stock, 120)
+
+    def test_complete_production_without_production_status_raises(self):
+        with self.assertRaises(ValueError):
+            self.service.complete_production("O1")  # 아직 RECEIVED
+
+    def test_confirmed_then_ship_deducts_stock(self):
+        self.service.decide("O1", approve=True)  # -> CONFIRMED (재고 20 >= 10)
         self.service.ship("O1")
         self.assertEqual(self.order_repo.get("O1").status, "SHIPPED")
         self.assertEqual(self.sample_repo.get("S1").stock, 10)
 
-    def test_approve_with_insufficient_stock_raises(self):
-        self.order_repo.create(Order("O2", "S1", "ACME", 100, "RECEIVED", "2026-01-01T00:00:00"))
+    def test_ship_without_confirmation_raises(self):
         with self.assertRaises(ValueError):
-            self.service.approve("O2")
-
-    def test_reject_then_approve_raises(self):
-        self.service.reject("O1")
-        with self.assertRaises(ValueError):
-            self.service.approve("O1")
-
-    def test_ship_without_production_raises(self):
-        self.service.approve("O1")
-        with self.assertRaises(ValueError):
-            self.service.ship("O1")
+            self.service.ship("O1")  # 아직 RECEIVED
 
 
 class OrderServiceReceiveOrderTest(unittest.TestCase):
