@@ -149,6 +149,14 @@ class OrderRepositoryTest(unittest.TestCase):
         self.order_repo.create(Order("O-20260715-001", "S1", "ACME", 1, "RECEIVED", "2026-07-15T00:00:00"))
         self.assertEqual(self.order_repo.next_order_id("20260716"), "O-20260716-001")
 
+    def test_next_production_queue_seq_starts_at_1(self):
+        self.assertEqual(self.order_repo.next_production_queue_seq(), 1)
+
+    def test_next_production_queue_seq_increments(self):
+        self.order_repo.create(Order("O1", "S1", "ACME", 10, "RECEIVED", "2026-01-01T00:00:00"))
+        self.order_repo.set_production_queue_seq("O1", 1)
+        self.assertEqual(self.order_repo.next_production_queue_seq(), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -44,6 +44,7 @@ class Order:
     created_at: str
     production_quantity: int = None
     production_started_at: str = None
+    production_queue_seq: int = None
 
     def __post_init__(self):
         if self.quantity <= 0:
@@ -60,4 +61,5 @@ class Order:
             created_at=row["created_at"],
             production_quantity=row["production_quantity"],
             production_started_at=row["production_started_at"],
+            production_queue_seq=row["production_queue_seq"],
         )

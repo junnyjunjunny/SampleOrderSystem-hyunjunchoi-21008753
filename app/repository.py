@@ -141,3 +141,15 @@ class OrderRepository:
         self.conn.commit()
         if cursor.rowcount == 0:
             raise KeyError(f"Order not found: {order_id}")
+
+    def next_production_queue_seq(self) -> int:
+        row = self.conn.execute("SELECT MAX(production_queue_seq) AS max_seq FROM orders").fetchone()
+        return (row["max_seq"] or 0) + 1
+
+    def set_production_queue_seq(self, order_id: str, seq: int) -> None:
+        cursor = self.conn.execute(
+            "UPDATE orders SET production_queue_seq = ? WHERE order_id = ?", (seq, order_id)
+        )
+        self.conn.commit()
+        if cursor.rowcount == 0:
+            raise KeyError(f"Order not found: {order_id}")

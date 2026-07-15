@@ -125,6 +125,26 @@ class OrderServiceProductionLineTest(unittest.TestCase):
         self.assertIsNotNone(self.order_repo.get(order_b).production_started_at)
         self.assertEqual(self.order_repo.get(order_b).status, "PRODUCTION")
 
+    def test_waiting_queue_orders_by_decision_time_not_receipt_time(self):
+        # OA received first (earliest created_at) but decided last
+        self.order_repo.create(Order("OA", "S1", "ACME", 10, "RECEIVED", "2020-01-01T00:00:00"))
+        # OC received in the middle
+        self.order_repo.create(Order("OC", "S1", "ACME", 10, "RECEIVED", "2020-06-01T00:00:00"))
+        # OB received last (latest created_at) but decided first
+        self.order_repo.create(Order("OB", "S1", "ACME", 10, "RECEIVED", "2020-12-01T00:00:00"))
+
+        self.service.decide("OB", approve=True)  # line idle -> becomes current immediately
+        self.service.decide("OC", approve=True)  # queued 2nd
+        self.service.decide("OA", approve=True)  # queued 3rd, despite earliest created_at
+
+        started = datetime.now(timezone.utc) - timedelta(minutes=21)
+        self.order_repo.set_production_started_at("OB", started.isoformat())
+        self.service.advance_production_line()  # OB completes, next in FIFO (by decision time) should start
+
+        self.assertEqual(self.order_repo.get("OB").status, "CONFIRMED")
+        self.assertIsNotNone(self.order_repo.get("OC").production_started_at)
+        self.assertIsNone(self.order_repo.get("OA").production_started_at)
+
     def test_advance_backfills_legacy_order_missing_production_quantity(self):
         self.order_repo.create(Order("O-LEGACY", "S1", "ACME", 15, "PRODUCTION", "2026-01-01T00:00:00"))
         self.service.advance_production_line()

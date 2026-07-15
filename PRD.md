@@ -31,6 +31,7 @@
 | created_at | str | 접수 시각(ISO) |
 | production_quantity | int, nullable | 실 생산량(`ceil(부족분/수율)`). `PRODUCTION` 전이 시 결정 |
 | production_started_at | str, nullable | 생산 라인에서 "현재 처리 중"이 된 시각(ISO, UTC). 단일 생산 라인이라 한 번에 하나의 주문만 값을 가짐 |
+| production_queue_seq | int, nullable | 생산 대기열 진입 순번(FIFO 정렬 기준). `PRODUCTION` 전이 시 부여, 접수 시각이 아니라 승인 시각 기준으로 순서를 매김 |
 
 ### 주문 상태 흐름
 

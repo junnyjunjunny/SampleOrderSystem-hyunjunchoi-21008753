@@ -44,6 +44,7 @@ class OrderService:
         shortage = order.quantity - sample.stock
         production_quantity = math.ceil(shortage / sample.yield_rate)
         self.order_repo.set_production_quantity(order_id, production_quantity)
+        self.order_repo.set_production_queue_seq(order_id, self.order_repo.next_production_queue_seq())
         self._transition(order_id, PRODUCTION)
         self.advance_production_line()
         return PRODUCTION
@@ -69,7 +70,7 @@ class OrderService:
                 orders = self.order_repo.list_all(PRODUCTION)
                 current = None
         if current is None:
-            waiting = sorted(orders, key=lambda o: o.created_at)
+            waiting = sorted(orders, key=lambda o: (o.production_queue_seq is None, o.production_queue_seq or 0, o.created_at))
             if waiting:
                 next_order = waiting[0]
                 if next_order.production_quantity is None:

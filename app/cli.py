@@ -1,5 +1,7 @@
 import math
+import msvcrt
 import os
+import time
 from datetime import datetime, timedelta, timezone
 
 from app.models import Sample
@@ -360,12 +362,18 @@ def _gauge(progress_pct: float, width: int = 20) -> str:
     return "[" + "#" * filled + "-" * (width - filled) + "]"
 
 
-def production_line_menu(sample_repo: SampleRepository, order_repo: OrderRepository, service: OrderService) -> None:
+PRODUCTION_LINE_REFRESH_SECONDS = 0.3
+
+
+def _render_production_line(sample_repo: SampleRepository, order_repo: OrderRepository, service: OrderService) -> None:
     clear_screen()
     service.advance_production_line()
     orders = order_repo.list_all("PRODUCTION")
     current = next((o for o in orders if o.production_started_at), None)
-    waiting = sorted((o for o in orders if not o.production_started_at), key=lambda o: o.created_at)
+    waiting = sorted(
+        (o for o in orders if not o.production_started_at),
+        key=lambda o: (o.production_queue_seq is None, o.production_queue_seq or 0, o.created_at),
+    )
 
     print("\n===== 생산 라인 조회 =====")
     print(f"생산라인 1 | 현재 상태: {'RUN' if current else 'STOP'}\n")
@@ -419,11 +427,17 @@ def production_line_menu(sample_repo: SampleRepository, order_repo: OrderReposit
             cumulative_start = expected
         print_table(headers, rows, widths)
 
+    print("\n[0] 뒤로  (실시간 자동 갱신 중...)")
+
+
+def production_line_menu(sample_repo: SampleRepository, order_repo: OrderRepository, service: OrderService) -> None:
     while True:
-        choice = input("\n[0] 뒤로 > ").strip()
-        if choice == "0":
-            return
-        print("[오류] 올바른 메뉴를 선택하세요.")
+        _render_production_line(sample_repo, order_repo, service)
+        tick_start = time.monotonic()
+        while time.monotonic() - tick_start < PRODUCTION_LINE_REFRESH_SECONDS:
+            if msvcrt.kbhit() and msvcrt.getch() == b"0":
+                return
+            time.sleep(0.05)
 
 
 def run(sample_repo: SampleRepository, order_repo: OrderRepository, service: OrderService) -> None:

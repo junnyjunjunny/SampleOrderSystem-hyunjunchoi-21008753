@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS orders (
     status TEXT NOT NULL,
     created_at TEXT NOT NULL,
     production_quantity INTEGER,
-    production_started_at TEXT
+    production_started_at TEXT,
+    production_queue_seq INTEGER
 );
 """
 
@@ -31,6 +32,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE orders ADD COLUMN production_quantity INTEGER")
     if "production_started_at" not in existing_columns:
         conn.execute("ALTER TABLE orders ADD COLUMN production_started_at TEXT")
+    if "production_queue_seq" not in existing_columns:
+        conn.execute("ALTER TABLE orders ADD COLUMN production_queue_seq INTEGER")
     conn.commit()
 
 
