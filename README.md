@@ -14,6 +14,32 @@
 - 생산 라인 조회
 - 출고 처리
 
+## 문서
+- 요구사항/도메인 설계: [PRD.md](PRD.md)
+- 개발 컨벤션(Claude Code 운영 하네스): [CLAUDE.md](CLAUDE.md)
+
+## 구조
+```
+app/
+  db.py          # SQLite 연결 및 스키마 초기화 (samples, orders)
+  models.py      # Sample, Order 데이터클래스
+  repository.py  # SampleRepository, OrderRepository: Create/Read/Update/Delete
+  services.py    # OrderService: 주문 상태 전이 및 재고 검증 규칙
+  cli.py         # 콘솔 메뉴 / 입출력
+main.py          # 진입점
+tests/           # in-memory sqlite 기반 단위 테스트
+```
+
+## 실행 방법
+```
+python main.py
+```
+
+## 테스트
+```
+python -m unittest discover tests
+```
+
 ## 담당자
 - 이름: hyunjunchoi
 - 사번: 21008753
