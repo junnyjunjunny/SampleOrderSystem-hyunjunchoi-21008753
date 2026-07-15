@@ -1,3 +1,5 @@
+import math
+import os
 from datetime import datetime, timezone
 
 from app.models import Order, Sample
@@ -5,10 +7,34 @@ from app.repository import OrderRepository, SampleRepository
 from app.services import OrderService
 
 
+def clear_screen() -> None:
+    os.system("cls")
+
+
+def pause() -> None:
+    input("\n계속하려면 Enter > ")
+
+
+def paginate(items, page: int, page_size: int = 5):
+    total_pages = max(1, math.ceil(len(items) / page_size))
+    page = max(0, min(page, total_pages - 1))
+    start = page * page_size
+    return items[start : start + page_size], page, total_pages
+
+
 def print_menu() -> None:
     print("\n===== S-Semi 시료 주문관리 =====")
-    print("[1] 시료 등록  [2] 시료 조회  [3] 주문 접수  [4] 주문 승인")
-    print("[5] 주문 거절  [6] 생산 시작  [7] 출고  [8] 주문 목록  [0] 종료")
+    print("[1] 시료 관리  [2] 주문 접수  [3] 주문 승인  [4] 주문 거절")
+    print("[5] 생산 시작  [6] 출고  [7] 주문 목록  [0] 종료")
+
+
+def print_sample_table(samples) -> None:
+    if not samples:
+        print("등록된 시료가 없습니다.")
+        return
+    print(f"{'ID':<8}{'이름':<20}{'수율':<8}{'재고':<8}")
+    for s in samples:
+        print(f"{s.sample_id:<8}{s.name:<20}{s.yield_rate:<8}{s.stock:<8}")
 
 
 def register_sample(sample_repo: SampleRepository) -> None:
@@ -21,14 +47,76 @@ def register_sample(sample_repo: SampleRepository) -> None:
     print("등록 완료.")
 
 
-def list_samples(sample_repo: SampleRepository) -> None:
-    samples = sample_repo.list_all()
-    if not samples:
-        print("등록된 시료가 없습니다.")
-        return
-    print(f"{'ID':<8}{'이름':<20}{'수율':<8}{'재고':<8}")
-    for s in samples:
-        print(f"{s.sample_id:<8}{s.name:<20}{s.yield_rate:<8}{s.stock:<8}")
+def search_samples(sample_repo: SampleRepository) -> None:
+    field = input("검색 기준 (id/name) > ").strip().lower()
+    query = input("검색어 > ").strip()
+    results = sample_repo.search(field, query)
+    print_sample_table(results)
+
+
+def edit_or_delete_sample(sample_repo: SampleRepository) -> None:
+    sample_id = input("수정/삭제할 시료 ID > ").strip()
+    sample = sample_repo.get(sample_id)
+    print(f"현재 값: 이름={sample.name}, 생산시간={sample.avg_production_time}, "
+          f"수율={sample.yield_rate}, 재고={sample.stock}")
+    action = input("[1] 수정  [2] 삭제 > ").strip()
+    if action == "1":
+        name = input(f"이름(엔터=유지: {sample.name}) > ").strip() or sample.name
+        avg_time_raw = input(f"평균 생산시간(엔터=유지: {sample.avg_production_time}) > ").strip()
+        avg_time = float(avg_time_raw) if avg_time_raw else sample.avg_production_time
+        yield_rate_raw = input(f"수율(엔터=유지: {sample.yield_rate}) > ").strip()
+        yield_rate = float(yield_rate_raw) if yield_rate_raw else sample.yield_rate
+        stock_raw = input(f"재고(엔터=유지: {sample.stock}) > ").strip()
+        stock = int(stock_raw) if stock_raw else sample.stock
+        sample_repo.update(Sample(sample_id, name, avg_time, yield_rate, stock))
+        print("수정 완료.")
+    elif action == "2":
+        sample_repo.delete(sample_id)
+        print("삭제 완료.")
+    else:
+        raise ValueError(f"잘못된 항목: {action}")
+
+
+def sample_management_menu(sample_repo: SampleRepository) -> None:
+    page = 0
+    while True:
+        clear_screen()
+        print("\n===== 시료 관리 =====")
+        samples = sample_repo.list_all()
+        page_items, page, total_pages = paginate(samples, page)
+        print_sample_table(page_items)
+        print(f"(페이지 {page + 1}/{total_pages})")
+        choice = input("[N] 다음  [B] 이전  [1] 검색  [2] 등록  [3] 수정/삭제  [0] 뒤로 > ").strip().upper()
+        if choice == "0":
+            return
+        if choice == "N":
+            if page + 1 >= total_pages:
+                print("마지막 페이지입니다.")
+                pause()
+            else:
+                page += 1
+            continue
+        if choice == "B":
+            if page == 0:
+                print("첫 페이지입니다.")
+                pause()
+            else:
+                page -= 1
+            continue
+        action = {
+            "1": lambda: search_samples(sample_repo),
+            "2": lambda: register_sample(sample_repo),
+            "3": lambda: edit_or_delete_sample(sample_repo),
+        }.get(choice)
+        if action is None:
+            print("[오류] 올바른 메뉴를 선택하세요.")
+            pause()
+            continue
+        try:
+            action()
+        except (ValueError, KeyError) as exc:
+            print(f"[오류] {exc}")
+        pause()
 
 
 def receive_order(order_repo: OrderRepository) -> None:
@@ -86,16 +174,16 @@ def list_orders(order_repo: OrderRepository) -> None:
 
 def run(sample_repo: SampleRepository, order_repo: OrderRepository, service: OrderService) -> None:
     actions = {
-        "1": lambda: register_sample(sample_repo),
-        "2": lambda: list_samples(sample_repo),
-        "3": lambda: receive_order(order_repo),
-        "4": lambda: approve_order(service),
-        "5": lambda: reject_order(service),
-        "6": lambda: start_production(service),
-        "7": lambda: ship_order(service),
-        "8": lambda: list_orders(order_repo),
+        "1": lambda: sample_management_menu(sample_repo),
+        "2": lambda: receive_order(order_repo),
+        "3": lambda: approve_order(service),
+        "4": lambda: reject_order(service),
+        "5": lambda: start_production(service),
+        "6": lambda: ship_order(service),
+        "7": lambda: list_orders(order_repo),
     }
     while True:
+        clear_screen()
         print_menu()
         choice = input("선택 > ").strip()
         if choice == "0":
@@ -104,8 +192,11 @@ def run(sample_repo: SampleRepository, order_repo: OrderRepository, service: Ord
         action = actions.get(choice)
         if action is None:
             print("[오류] 올바른 메뉴를 선택하세요.")
+            pause()
             continue
         try:
             action()
         except (ValueError, KeyError) as exc:
             print(f"[오류] {exc}")
+        if choice != "1":
+            pause()

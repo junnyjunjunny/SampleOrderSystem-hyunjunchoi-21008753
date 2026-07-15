@@ -15,6 +15,14 @@ class Sample:
     yield_rate: float
     stock: int = 0
 
+    def __post_init__(self):
+        if self.avg_production_time <= 0:
+            raise ValueError("avg_production_time must be greater than 0")
+        if not 0 <= self.yield_rate <= 1:
+            raise ValueError("yield_rate must be between 0 and 1")
+        if self.stock < 0:
+            raise ValueError("stock must not be negative")
+
     @classmethod
     def from_row(cls, row) -> "Sample":
         return cls(

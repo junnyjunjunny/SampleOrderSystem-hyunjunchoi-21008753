@@ -10,13 +10,15 @@
 ## 도메인 모델
 
 ### Sample (시료)
-| 필드 | 타입 | 설명 |
-|---|---|---|
-| sample_id | str | PK |
-| name | str | 시료명 |
-| avg_production_time | float | 평균 생산시간(분/개) |
-| yield_rate | float | 수율 (0~1) |
-| stock | int | 현재 재고 |
+| 필드 | 타입 | 설명 | 제약 |
+|---|---|---|---|
+| sample_id | str | PK | 필수, 중복 불가 |
+| name | str | 시료명 | 필수 |
+| avg_production_time | float | 평균 생산시간(분/개) | 0보다 커야 함 |
+| yield_rate | float | 수율 (0~1) | 0 이상 1 이하 |
+| stock | int | 현재 재고 | 0 이상 |
+
+값 검증은 `Sample.__post_init__`(생성 시점)에서 수행하며, 위반 시 `ValueError`를 던진다.
 
 ### Order (주문)
 | 필드 | 타입 | 설명 |
@@ -43,7 +45,7 @@ RECEIVED --승인--> APPROVED --생산 시작--> IN_PRODUCTION --출고--> SHIPP
 ## 기능 범위
 
 ### 이번 스캐폴드에서 구현 (핵심 흐름)
-- 시료 등록 / 조회
+- 시료 등록 / 조회 / 검색(ID·이름 대소문자 무시 부분일치) / 수정 / 삭제
 - 시료 주문 접수
 - 주문 승인 / 거절
 - 생산 시작 / 출고 처리

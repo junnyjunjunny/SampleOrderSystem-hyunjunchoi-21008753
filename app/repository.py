@@ -3,6 +3,10 @@ import sqlite3
 from app.models import Order, Sample
 
 
+def _escape_like(query: str) -> str:
+    return query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 class SampleRepository:
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
@@ -39,6 +43,36 @@ class SampleRepository:
         self.conn.commit()
         if cursor.rowcount == 0:
             raise KeyError(f"Sample not found: {sample_id}")
+
+    def update(self, sample: Sample) -> None:
+        cursor = self.conn.execute(
+            """
+            UPDATE samples
+            SET name = ?, avg_production_time = ?, yield_rate = ?, stock = ?
+            WHERE sample_id = ?
+            """,
+            (sample.name, sample.avg_production_time, sample.yield_rate, sample.stock, sample.sample_id),
+        )
+        self.conn.commit()
+        if cursor.rowcount == 0:
+            raise KeyError(f"Sample not found: {sample.sample_id}")
+
+    def delete(self, sample_id: str) -> None:
+        cursor = self.conn.execute("DELETE FROM samples WHERE sample_id = ?", (sample_id,))
+        self.conn.commit()
+        if cursor.rowcount == 0:
+            raise KeyError(f"Sample not found: {sample_id}")
+
+    def search(self, field: str, query: str):
+        try:
+            column = {"id": "sample_id", "name": "name"}[field]
+        except KeyError as exc:
+            raise KeyError(f"Invalid search field: {field}") from exc
+        rows = self.conn.execute(
+            f"SELECT * FROM samples WHERE {column} LIKE ? ESCAPE '\\' COLLATE NOCASE ORDER BY sample_id",
+            (f"%{_escape_like(query)}%",),
+        ).fetchall()
+        return [Sample.from_row(row) for row in rows]
 
 
 class OrderRepository:
