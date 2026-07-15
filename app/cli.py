@@ -22,19 +22,64 @@ def paginate(items, page: int, page_size: int = 5):
     return items[start : start + page_size], page, total_pages
 
 
+GREEN = "\033[92m"
+ORANGE = "\033[38;5;208m"
+RED = "\033[91m"
+HEADER_BG = "\033[44m\033[97m"
+RESET = "\033[0m"
+
+
+def _visible_len(text) -> int:
+    text = str(text)
+    length = 0
+    in_escape = False
+    for ch in text:
+        if ch == "\033":
+            in_escape = True
+            continue
+        if in_escape:
+            if ch == "m":
+                in_escape = False
+            continue
+        length += 1
+    return length
+
+
+def _pad_cell(value, width: int) -> str:
+    text = str(value)
+    pad = max(0, width - _visible_len(text))
+    return text + " " * pad
+
+
+def print_table(headers, rows, widths) -> None:
+    def border(left, mid, right):
+        return left + mid.join("─" * (w + 2) for w in widths) + right
+
+    def format_row(cells):
+        return "│" + "│".join(f" {_pad_cell(c, w)} " for c, w in zip(cells, widths)) + "│"
+
+    print(border("┌", "┬", "┐"))
+    print(f"{HEADER_BG}{format_row(headers)}{RESET}")
+    print(border("├", "┼", "┤"))
+    for row in rows:
+        print(format_row(row))
+    print(border("└", "┴", "┘"))
+
+
 def print_menu() -> None:
     print("\n===== S-Semi 시료 주문관리 =====")
-    print("[1] 시료 관리  [2] 시료 주문  [3] 주문 승인/거절  [4] 생산 완료")
-    print("[5] 출고  [6] 주문 목록  [0] 종료")
+    print("[1] 시료 관리  [2] 시료 주문  [3] 주문 승인/거절  [4] 모니터링")
+    print("[5] 생산 라인 조회  [6] 출고 처리  [0] 종료")
 
 
 def print_sample_table(samples) -> None:
     if not samples:
         print("등록된 시료가 없습니다.")
         return
-    print(f"{'ID':<8}{'이름':<20}{'수율':<8}{'재고':<8}")
-    for s in samples:
-        print(f"{s.sample_id:<8}{s.name:<20}{s.yield_rate:<8}{s.stock:<8}")
+    headers = ["ID", "이름", "수율", "재고"]
+    widths = [8, 20, 6, 6]
+    rows = [[s.sample_id, s.name, s.yield_rate, s.stock] for s in samples]
+    print_table(headers, rows, widths)
 
 
 def register_sample(sample_repo: SampleRepository) -> None:
@@ -149,13 +194,16 @@ def print_order_approval_table(orders, sample_repo: SampleRepository) -> None:
     if not orders:
         print("승인/거절 대기 중인 주문이 없습니다.")
         return
-    print(f"{'번호':<4}{'주문번호':<14}{'고객':<12}{'시료':<20}{'수량':<6}{'상태':<10}")
+    headers = ["번호", "주문번호", "고객", "시료", "수량", "상태"]
+    widths = [4, 14, 12, 20, 6, 10]
+    rows = []
     for i, o in enumerate(orders, start=1):
         try:
             sample_name = sample_repo.get(o.sample_id).name
         except KeyError:
             sample_name = "(삭제된 시료)"
-        print(f"{i:<4}{o.order_id:<14}{o.customer_name:<12}{sample_name:<20}{o.quantity:<6}{o.status:<10}")
+        rows.append([i, o.order_id, o.customer_name, sample_name, o.quantity, o.status])
+    print_table(headers, rows, widths)
 
 
 def decide_selected_order(sample_repo: SampleRepository, service: OrderService, order) -> bool:
@@ -221,27 +269,86 @@ def order_approval_menu(sample_repo: SampleRepository, order_repo: OrderReposito
             pause()
 
 
-def complete_production_order(service: OrderService) -> None:
-    order_id = input("생산 완료 처리할 주문번호 > ").strip()
-    service.complete_production(order_id)
-    print("생산 완료 처리되었습니다.")
-
-
 def ship_order(service: OrderService) -> None:
     order_id = input("출고할 주문 ID > ").strip()
     service.ship(order_id)
     print("출고 완료.")
 
 
-def list_orders(order_repo: OrderRepository) -> None:
-    status = input("상태 필터(엔터=전체) > ").strip() or None
-    orders = order_repo.list_all(status)
+ORDER_VOLUME_STATUSES = ["RECEIVED", "CONFIRMED", "PRODUCTION", "RELEASE"]
+
+STOCK_FULL_CAPACITY = 1000
+STOCK_ABUNDANT_THRESHOLD = 60
+STOCK_LOW_THRESHOLD = 20
+
+
+def check_order_volume(order_repo: OrderRepository) -> None:
+    orders = [o for o in order_repo.list_all() if o.status != "REJECTED"]
+    print("상태별 주문 현황")
+    counts = {status: 0 for status in ORDER_VOLUME_STATUSES}
+    for o in orders:
+        if o.status in counts:
+            counts[o.status] += 1
+    for status in ORDER_VOLUME_STATUSES:
+        print(f"{status}: {counts[status]}건")
+    print()
     if not orders:
         print("조회된 주문이 없습니다.")
         return
-    print(f"{'ID':<8}{'시료ID':<8}{'고객':<12}{'수량':<6}{'상태':<14}")
-    for o in orders:
-        print(f"{o.order_id:<8}{o.sample_id:<8}{o.customer_name:<12}{o.quantity:<6}{o.status:<14}")
+    headers = ["ID", "시료ID", "고객", "수량", "상태"]
+    widths = [14, 8, 12, 6, 12]
+    rows = [[o.order_id, o.sample_id, o.customer_name, o.quantity, o.status] for o in orders]
+    print_table(headers, rows, widths)
+
+
+def _stock_ratio_status(stock: int):
+    ratio = stock / STOCK_FULL_CAPACITY * 100
+    if ratio >= STOCK_ABUNDANT_THRESHOLD:
+        return ratio, "여유", GREEN
+    if ratio >= STOCK_LOW_THRESHOLD:
+        return ratio, "부족", ORANGE
+    return ratio, "고갈", RED
+
+
+def check_stock_level(sample_repo: SampleRepository) -> None:
+    samples = sample_repo.list_all()
+    if not samples:
+        print("등록된 시료가 없습니다.")
+        return
+    headers = ["시료명", "재고", "상태", "잔여율"]
+    widths = [20, 8, 10, 8]
+    rows = []
+    for s in samples:
+        ratio, label, color = _stock_ratio_status(s.stock)
+        colored_label = f"{color}{label}{RESET}"
+        rows.append([s.name, s.stock, colored_label, f"{ratio:.0f}%"])
+    print_table(headers, rows, widths)
+
+
+def monitoring_menu(sample_repo: SampleRepository, order_repo: OrderRepository) -> None:
+    while True:
+        clear_screen()
+        print("\n===== 모니터링 =====")
+        choice = input("[1] 주문량 확인  [2] 재고량 확인  [0] 뒤로 > ").strip()
+        if choice == "0":
+            return
+        action = {
+            "1": lambda: check_order_volume(order_repo),
+            "2": lambda: check_stock_level(sample_repo),
+        }.get(choice)
+        if action is None:
+            print("[오류] 올바른 메뉴를 선택하세요.")
+            pause()
+            continue
+        try:
+            action()
+        except (ValueError, KeyError) as exc:
+            print(f"[오류] {exc}")
+        pause()
+
+
+def production_line_menu() -> None:
+    print("생산 라인 조회는 아직 개발되지 않았습니다.")
 
 
 def run(sample_repo: SampleRepository, order_repo: OrderRepository, service: OrderService) -> None:
@@ -249,9 +356,9 @@ def run(sample_repo: SampleRepository, order_repo: OrderRepository, service: Ord
         "1": lambda: sample_management_menu(sample_repo),
         "2": lambda: order_reception_menu(service),
         "3": lambda: order_approval_menu(sample_repo, order_repo, service),
-        "4": lambda: complete_production_order(service),
-        "5": lambda: ship_order(service),
-        "6": lambda: list_orders(order_repo),
+        "4": lambda: monitoring_menu(sample_repo, order_repo),
+        "5": lambda: production_line_menu(),
+        "6": lambda: ship_order(service),
     }
     while True:
         clear_screen()
@@ -269,5 +376,5 @@ def run(sample_repo: SampleRepository, order_repo: OrderRepository, service: Ord
             action()
         except (ValueError, KeyError) as exc:
             print(f"[오류] {exc}")
-        if choice not in ("1", "2", "3"):
+        if choice not in ("1", "2", "3", "4"):
             pause()

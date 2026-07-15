@@ -33,7 +33,7 @@
 ### 주문 상태 흐름
 
 ```
-RECEIVED --승인(재고 충분)--> CONFIRMED --출고--> SHIPPED
+RECEIVED --승인(재고 충분)--> CONFIRMED --출고--> RELEASE
    |         승인(재고 부족)
    |              v
    |         PRODUCTION --생산 완료--> CONFIRMED
@@ -44,8 +44,8 @@ RECEIVED --승인(재고 충분)--> CONFIRMED --출고--> SHIPPED
 - 상태 전이는 `OrderService`가 검증한다(허용되지 않는 전이는 `ValueError`).
 - 시료 주문(2번) 메뉴는 접수만 담당하며 접수된 주문은 `RECEIVED`로 저장되고 끝난다. 승인/거절 판단은 전적으로 3번 메뉴에서 이후에 진행한다.
 - 3번(주문 승인/거절) 메뉴에서 승인(`Y`)을 선택하면, 그 시점의 재고와 주문 수량을 비교해 자동으로 갈린다: 재고가 충분하면 `CONFIRMED`, 부족하면 `PRODUCTION`. 거절(`N`)은 바로 `REJECTED`.
-- `PRODUCTION`은 4번(생산 완료) 메뉴에서 완료 처리하면 `CONFIRMED`로 전이하고, 그때 부족했던 만큼 재고를 채운다(`stock += quantity`).
-- `CONFIRMED`에서 5번(출고) 메뉴로 `SHIPPED`로 전이할 때 재고를 주문 수량만큼 차감한다.
+- `PRODUCTION`은 향후 5번(생산 라인 조회) 메뉴가 담당할 자동 생산 로직으로 `CONFIRMED`로 전이하고, 그때 부족했던 만큼 재고를 채운다(`stock += quantity`). 시료의 `avg_production_time`에 따라 시간이 지나면 자동으로 생산되는 방식으로 설계 예정(`docs/05-생산라인조회.md` 참고, 아직 미구현). `OrderService.complete_production`는 이 로직의 기반이 될 API로 이미 존재한다.
+- `CONFIRMED`에서 6번(출고 처리) 메뉴로 `RELEASE`로 전이할 때 재고를 주문 수량만큼 차감한다.
 
 ## 기능 범위
 
@@ -53,13 +53,12 @@ RECEIVED --승인(재고 충분)--> CONFIRMED --출고--> SHIPPED
 - 시료 등록 / 조회 / 검색(ID·이름 대소문자 무시 부분일치) / 수정 / 삭제
 - 시료 주문 접수
 - 주문 승인 / 거절(재고에 따라 `CONFIRMED`/`PRODUCTION` 자동 분기)
-- 생산 완료 처리 / 출고 처리
-- 주문 목록 조회(상태별 필터링)
+- 모니터링(주문량 확인) / 출고 처리
 
 ### 다음 단계로 미룸
-- 모니터링 대시보드(주문량/재고량 실시간 집계) — DataMonitor PoC 연계
+- 모니터링 재고량 확인 등 추가 하위 메뉴
 - 더미 데이터 자동 시딩 — DummyDataGenerator PoC 연계
-- 생산 라인 조회(라인별 배정 — "생산 완료 처리"와는 별개로, 어느 라인에서 생산 중인지 조회하는 기능)
+- 생산 라인 조회 — `PRODUCTION` 주문의 자동 생산 진행 상황 조회 및 완료 처리(시료 `avg_production_time` 기반 시간 경과 자동화)
 
 ## 아키텍처
 

@@ -69,7 +69,7 @@ class OrderServiceTest(unittest.TestCase):
     def test_confirmed_then_ship_deducts_stock(self):
         self.service.decide("O1", approve=True)  # -> CONFIRMED (재고 20 >= 10)
         self.service.ship("O1")
-        self.assertEqual(self.order_repo.get("O1").status, "SHIPPED")
+        self.assertEqual(self.order_repo.get("O1").status, "RELEASE")
         self.assertEqual(self.sample_repo.get("S1").stock, 10)
 
     def test_ship_without_confirmation_raises(self):

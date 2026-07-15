@@ -1,12 +1,12 @@
 from datetime import datetime, timezone
 
-from app.models import CONFIRMED, PRODUCTION, REJECTED, RECEIVED, SHIPPED, Order
+from app.models import CONFIRMED, PRODUCTION, REJECTED, RECEIVED, RELEASE, Order
 from app.repository import OrderRepository, SampleRepository
 
 ALLOWED_TRANSITIONS = {
     RECEIVED: {CONFIRMED, PRODUCTION, REJECTED},
     PRODUCTION: {CONFIRMED},
-    CONFIRMED: {SHIPPED},
+    CONFIRMED: {RELEASE},
 }
 
 
@@ -52,5 +52,5 @@ class OrderService:
     def ship(self, order_id: str) -> None:
         order = self.order_repo.get(order_id)
         sample = self.sample_repo.get(order.sample_id)
-        self._transition(order_id, SHIPPED)
+        self._transition(order_id, RELEASE)
         self.sample_repo.update_stock(sample.sample_id, sample.stock - order.quantity)
