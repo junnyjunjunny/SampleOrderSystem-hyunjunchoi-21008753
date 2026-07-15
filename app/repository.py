@@ -100,6 +100,15 @@ class OrderRepository:
             raise KeyError(f"Order not found: {order_id}")
         return Order.from_row(row)
 
+    def next_order_id(self, date_str: str) -> str:
+        prefix = f"O-{date_str}-"
+        row = self.conn.execute(
+            "SELECT order_id FROM orders WHERE order_id LIKE ? ORDER BY order_id DESC LIMIT 1",
+            (f"{prefix}%",),
+        ).fetchone()
+        seq = int(row["order_id"].rsplit("-", 1)[1]) + 1 if row else 1
+        return f"{prefix}{seq:03d}"
+
     def list_all(self, status: str | None = None):
         if status is None:
             rows = self.conn.execute("SELECT * FROM orders ORDER BY created_at").fetchall()

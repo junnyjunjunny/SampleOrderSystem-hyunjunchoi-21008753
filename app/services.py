@@ -1,4 +1,6 @@
-from app.models import APPROVED, IN_PRODUCTION, REJECTED, RECEIVED, SHIPPED
+from datetime import datetime, timezone
+
+from app.models import APPROVED, IN_PRODUCTION, REJECTED, RECEIVED, SHIPPED, Order
 from app.repository import OrderRepository, SampleRepository
 
 ALLOWED_TRANSITIONS = {
@@ -19,6 +21,13 @@ class OrderService:
         if new_status not in allowed:
             raise ValueError(f"Cannot move order {order_id} from {order.status} to {new_status}")
         self.order_repo.update_status(order_id, new_status)
+
+    def receive_order(self, sample_id: str, customer_name: str, quantity: int) -> str:
+        self.sample_repo.get(sample_id)
+        order_id = self.order_repo.next_order_id(datetime.now().strftime("%Y%m%d"))
+        order = Order(order_id, sample_id, customer_name, quantity, RECEIVED, datetime.now(timezone.utc).isoformat())
+        self.order_repo.create(order)
+        return order_id
 
     def approve(self, order_id: str) -> None:
         order = self.order_repo.get(order_id)

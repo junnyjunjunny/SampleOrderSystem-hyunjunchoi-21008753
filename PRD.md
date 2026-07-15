@@ -39,6 +39,7 @@ RECEIVED --승인--> APPROVED --생산 시작--> IN_PRODUCTION --출고--> SHIPP
 ```
 
 - 상태 전이는 `OrderService`가 검증한다(허용되지 않는 전이는 `ValueError`).
+- 시료 주문(2번) 메뉴는 접수만 담당하며 접수된 주문은 `RECEIVED`로 저장되고 끝난다. 승인/거절 판단은 전적으로 3번 메뉴에서 이후에 진행한다.
 - `APPROVED`로 전이할 때 재고(`stock`)가 주문 수량 이상인지 확인한다.
 - `SHIPPED`로 전이할 때 재고를 주문 수량만큼 차감한다.
 

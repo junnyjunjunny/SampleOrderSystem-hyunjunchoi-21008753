@@ -46,5 +46,29 @@ class OrderServiceTest(unittest.TestCase):
             self.service.ship("O1")
 
 
+class OrderServiceReceiveOrderTest(unittest.TestCase):
+    def setUp(self):
+        self.conn = make_conn()
+        self.sample_repo = SampleRepository(self.conn)
+        self.order_repo = OrderRepository(self.conn)
+        self.service = OrderService(self.order_repo, self.sample_repo)
+        self.sample_repo.create(Sample("S1", "Wafer-A", 10.0, 0.95, 20))
+
+    def test_receive_order_generates_order_id_and_status_received(self):
+        order_id = self.service.receive_order("S1", "ACME", 5)
+        order = self.order_repo.get(order_id)
+        self.assertEqual(order.status, "RECEIVED")
+        self.assertEqual(order.sample_id, "S1")
+        self.assertEqual(order.quantity, 5)
+
+    def test_receive_order_with_missing_sample_raises(self):
+        with self.assertRaises(KeyError):
+            self.service.receive_order("NOPE", "ACME", 5)
+
+    def test_receive_order_with_zero_quantity_raises(self):
+        with self.assertRaises(ValueError):
+            self.service.receive_order("S1", "ACME", 0)
+
+
 if __name__ == "__main__":
     unittest.main()

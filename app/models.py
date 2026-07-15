@@ -43,6 +43,10 @@ class Order:
     status: str
     created_at: str
 
+    def __post_init__(self):
+        if self.quantity <= 0:
+            raise ValueError("quantity must be greater than 0")
+
     @classmethod
     def from_row(cls, row) -> "Order":
         return cls(

@@ -1,8 +1,7 @@
 import math
 import os
-from datetime import datetime, timezone
 
-from app.models import Order, Sample
+from app.models import Sample
 from app.repository import OrderRepository, SampleRepository
 from app.services import OrderService
 
@@ -24,7 +23,7 @@ def paginate(items, page: int, page_size: int = 5):
 
 def print_menu() -> None:
     print("\n===== S-Semi 시료 주문관리 =====")
-    print("[1] 시료 관리  [2] 주문 접수  [3] 주문 승인  [4] 주문 거절")
+    print("[1] 시료 관리  [2] 시료 주문  [3] 주문 승인  [4] 주문 거절")
     print("[5] 생산 시작  [6] 출고  [7] 주문 목록  [0] 종료")
 
 
@@ -119,22 +118,30 @@ def sample_management_menu(sample_repo: SampleRepository) -> None:
         pause()
 
 
-def receive_order(order_repo: OrderRepository) -> None:
-    order_id = input("주문 ID > ").strip()
+def receive_order(service: OrderService) -> None:
     sample_id = input("시료 ID > ").strip()
     customer_name = input("고객명 > ").strip()
     quantity = int(input("수량 > ").strip())
-    order_repo.create(
-        Order(
-            order_id=order_id,
-            sample_id=sample_id,
-            customer_name=customer_name,
-            quantity=quantity,
-            status="RECEIVED",
-            created_at=datetime.now(timezone.utc).isoformat(),
-        )
-    )
-    print("주문 접수 완료.")
+    order_id = service.receive_order(sample_id, customer_name, quantity)
+    print(f"주문 접수가 완료되었습니다. 주문번호: {order_id}")
+
+
+def order_reception_menu(service: OrderService) -> None:
+    while True:
+        clear_screen()
+        print("\n===== 시료 주문 =====")
+        choice = input("[1] 주문 접수  [0] 뒤로 > ").strip()
+        if choice == "0":
+            return
+        if choice != "1":
+            print("[오류] 올바른 메뉴를 선택하세요.")
+            pause()
+            continue
+        try:
+            receive_order(service)
+        except (ValueError, KeyError) as exc:
+            print(f"[오류] {exc}")
+        pause()
 
 
 def approve_order(service: OrderService) -> None:
@@ -175,7 +182,7 @@ def list_orders(order_repo: OrderRepository) -> None:
 def run(sample_repo: SampleRepository, order_repo: OrderRepository, service: OrderService) -> None:
     actions = {
         "1": lambda: sample_management_menu(sample_repo),
-        "2": lambda: receive_order(order_repo),
+        "2": lambda: order_reception_menu(service),
         "3": lambda: approve_order(service),
         "4": lambda: reject_order(service),
         "5": lambda: start_production(service),
@@ -198,5 +205,5 @@ def run(sample_repo: SampleRepository, order_repo: OrderRepository, service: Ord
             action()
         except (ValueError, KeyError) as exc:
             print(f"[오류] {exc}")
-        if choice != "1":
+        if choice not in ("1", "2"):
             pause()

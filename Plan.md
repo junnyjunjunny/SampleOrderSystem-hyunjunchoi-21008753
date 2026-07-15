@@ -1,33 +1,42 @@
-# Plan: 시료 관리 마무리 — 더미 시료 23건 시딩
+# Plan: 시료 주문(2번) 단순화 — 목록 제거, 접수 즉시 승인/거절
 
-> 다음 작업(주문 접수 등)과 묶어서 나중에 커밋한다.
-> 절차는 [CLAUDE.md](CLAUDE.md)의 "작업 진행 방식"(Plan.md/docs 갱신 → 구현) 참고.
+> 이전 사이클(FORWARDED 상태 도입, RECEIVED 목록+페이지네이션)을 되돌리는 정정. `docs/02-시료주문.md`/`docs/03-주문승인거절.md`/`PRD.md` 갱신 완료.
 
 ## 목표
 
-시료 관리(`[1]`) 메뉴를 수동으로 테스트(페이지네이션 5페이지 넘김, 검색, 수정/삭제)해볼 수 있도록 더미 시료 데이터 23건을 DB에 시딩하는 스크립트를 추가한다.
+1. `[2] 시료 주문`에서 RECEIVED 목록/페이지네이션을 제거한다.
+2. 진입 시 바로 `[1] 주문 접수  [0] 뒤로` 두 옵션만 보여준다.
+3. 주문 접수(시료ID/고객명/수량 입력) 직후, 그 자리에서 바로 승인/거절을 선택해 반영한다.
+4. `FORWARDED` 상태와 관련 코드(서비스/모델/테스트)를 전부 제거하고 `RECEIVED → {APPROVED, REJECTED}`로 되돌린다.
 
 ## 접근 방식
 
-- DummyDataGenerator PoC의 시딩 방식을 참고하되, `SampleRepository.create`(→ `Sample.__post_init__` 검증 재사용)를 통해 삽입해 검증을 우회하지 않는다.
-- `scripts/seed_samples.py`: 실행하면 실제 `samples.db`(프로젝트 기본 경로)에 23개의 고정된 반도체 시료 데이터를 삽입한다. 이미 존재하는 `sample_id`는 건너뛰고 안내 메시지만 출력한다(재실행해도 에러 없이 멱등).
-- 이름은 검색 기능(부분일치)을 테스트하기 좋도록 겹치는 키워드(웨이퍼, 기판 등)를 포함한 다양한 이름으로 구성한다.
+- **상태 되돌리기**: `app/models.py`에서 `FORWARDED` 제거. `app/services.py`의 `ALLOWED_TRANSITIONS`를 `RECEIVED: {APPROVED, REJECTED}`로 되돌리고 `OrderService.forward` 삭제.
+- **UI 교체**: `app/cli.py`의 `order_management_menu`/`print_order_table`/`forward_order`를 제거하고, 대신 `order_reception_menu(sample_repo, order_repo, service)` + `receive_and_decide(sample_repo, order_repo, service)`를 신설.
+  - `order_reception_menu`: `[1] 주문 접수  [0] 뒤로`만 있는 단순 루프(목록 없음).
+  - `receive_and_decide`: 시료ID/고객명/수량 입력 → `service.receive_order(...)` → 시료명/재고/주문수량 표시 → `[1] 승인  [2] 거절]` 입력 → `service.approve`/`reject` 호출.
+- **기존 3번 메뉴 유지**: 메인 메뉴 `[3] 주문 승인`/`[4] 주문 거절`(`approve_order`/`reject_order`)은 그대로 둔다 — 접수 시 재고 부족 등으로 바로 처리 못한 `RECEIVED` 주문을 나중에 처리하는 용도로 계속 동작.
+- **주문번호 자동 생성은 유지**: `OrderRepository.next_order_id`는 그대로 사용(이 기능 자체는 이번 요청과 무관하게 계속 필요).
+- **테스트**: `FORWARDED` 관련 테스트(`test_forward_*`, `test_approve_without_forwarding_raises`) 삭제하고 `OrderServiceTest.setUp`을 원래대로(`RECEIVED` 상태로 즉시 승인/거절 가능) 되돌린다. `next_order_id`/`receive_order` 테스트는 유지.
 
 ## 영향받는 파일
 
-- `scripts/seed_samples.py` — 신규, 23건 시딩 스크립트
-- `docs/01-시료관리.md` — 시딩 스크립트 사용법 한 줄 추가
+- `app/models.py` — `FORWARDED` 제거
+- `app/services.py` — `ALLOWED_TRANSITIONS` 되돌리기, `forward` 삭제
+- `app/cli.py` — `order_management_menu`/`print_order_table`/`forward_order` 삭제, `order_reception_menu`/`receive_and_decide` 신설, 메인 메뉴 `[2]` 연결 변경
+- `tests/test_services.py` — FORWARDED 관련 테스트 삭제, 기존 픽스처 원복
+- `docs/02-시료주문.md`, `docs/03-주문승인거절.md`, `PRD.md` — 이미 갱신됨
 
 ## 구현 & 검증 방법
 
-- [x] 구현: `scripts/seed_samples.py` 작성 (23개 고정 데이터, 중복 sample_id는 스킵)
-  - 확인: `py scripts/seed_samples.py` 실행 후 `paginate()`로 직접 확인 — 23건이 5페이지(5+5+5+5+3)로 정확히 나뉨
-  - 확인: 재실행 시 23건 전부 "이미 존재"로 스킵되고 에러 없음 확인
-  - 참고: 검증 중 이전 세션에서 남은 leftover row("123")가 실제 samples.db에 섞여 있어 정리 후 재확인함(gitignore 대상 db 파일 자체의 문제, 코드 문제 아님)
+- [x] 구현: 모델/서비스에서 `FORWARDED` 제거, 테스트 원복
+  - 확인: `python -m unittest discover tests` 전체 통과 (36/36)
+- [x] 구현: `cli.py`의 `order_reception_menu`/`receive_and_decide`로 교체
+  - 확인(사람 확인 선행): 실제 `cli.run()` 구동 — `[2]` 진입 시 목록 없이 `[1]주문접수 [0]뒤로`만 보임, 접수(`O-20260715-007`) 직후 시료명/재고/수량 표시 후 `[1]승인 [2]거절` 선택이 즉시 반영되어 상태가 `APPROVED`로 확인됨. 검증용 주문은 정리, 사용자가 직접 만든 `O-20260715-006`은 그대로 둠.
 
 ## 가벼운 자체 점검 (커밋 전, 필수)
 
-- [x] 문서 정합성: docs/01-시료관리.md에 시딩 스크립트 사용법 반영
-- [x] 범위 준수: `scripts/seed_samples.py`, `docs/01-시료관리.md`, `Plan.md` 외 변경 없음
-- [x] 테스트: 기존 30개 테스트 회귀 없음(신규 스크립트는 콘솔 유틸이라 별도 유닛 테스트는 생략, Plan에 기록된 결정)
-- [x] 컨벤션 준수: 삽입은 `SampleRepository.create` 경유(검증 우회 없음), 새 주석 없음
+- [x] 문서 정합성: PRD.md/docs/02/docs/03이 실제 구현과 일치하도록 갱신
+- [x] 범위 준수: 3번/4번 메인 메뉴(`approve_order`/`reject_order`) 코드 자체는 변경 없음, 문서만 두 진입 경로를 설명하도록 보강
+- [x] 테스트: 36/36 통과, FORWARDED 관련 코드/테스트 완전히 제거됨
+- [x] 컨벤션 준수: `receive_and_decide`는 입력 수집 후 `service.receive_order`/`approve`/`reject`만 호출 — 비즈니스 로직은 여전히 `services.py`에 위치

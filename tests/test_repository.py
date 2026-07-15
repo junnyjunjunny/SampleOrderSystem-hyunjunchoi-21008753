@@ -138,6 +138,17 @@ class OrderRepositoryTest(unittest.TestCase):
         self.order_repo.update_status("O1", "APPROVED")
         self.assertEqual(self.order_repo.get("O1").status, "APPROVED")
 
+    def test_next_order_id_starts_at_001_for_new_date(self):
+        self.assertEqual(self.order_repo.next_order_id("20260715"), "O-20260715-001")
+
+    def test_next_order_id_increments_for_same_date(self):
+        self.order_repo.create(Order("O-20260715-001", "S1", "ACME", 1, "RECEIVED", "2026-07-15T00:00:00"))
+        self.assertEqual(self.order_repo.next_order_id("20260715"), "O-20260715-002")
+
+    def test_next_order_id_is_independent_per_date(self):
+        self.order_repo.create(Order("O-20260715-001", "S1", "ACME", 1, "RECEIVED", "2026-07-15T00:00:00"))
+        self.assertEqual(self.order_repo.next_order_id("20260716"), "O-20260716-001")
+
 
 if __name__ == "__main__":
     unittest.main()
