@@ -46,9 +46,9 @@ RECEIVED --승인(재고 충분)--> CONFIRMED --출고--> RELEASE
 
 - 상태 전이는 `OrderService`가 검증한다(허용되지 않는 전이는 `ValueError`).
 - 시료 주문(2번) 메뉴는 접수만 담당하며 접수된 주문은 `RECEIVED`로 저장되고 끝난다. 승인/거절 판단은 전적으로 3번 메뉴에서 이후에 진행한다.
-- 3번(주문 승인/거절) 메뉴에서 승인(`Y`)을 선택하면, 그 시점의 재고와 주문 수량을 비교해 자동으로 갈린다: 재고가 충분하면 `CONFIRMED`, 부족하면 `PRODUCTION`. 거절(`N`)은 바로 `REJECTED`.
-- `PRODUCTION`은 5번(생산 라인 조회) 화면 진입마다 실행되는 `OrderService.advance_production_line()`이 시간 경과에 따라 자동으로 `CONFIRMED`로 전이시키고, 그때 `production_quantity`(실 생산량, 수율 반영)만큼 재고를 채운다. 생산 라인은 1개(단일 라인)라 한 번에 하나의 주문만 처리되며, 나머지는 대기열에서 순서를 기다린다. 자세한 계산식은 `docs/05-생산라인조회.md` 참고.
-- `CONFIRMED`에서 6번(출고 처리) 메뉴로 `RELEASE`로 전이할 때 재고를 주문 수량만큼 차감한다.
+- 3번(주문 승인/거절) 메뉴에서 승인(`Y`)을 선택하면, 그 시점의 재고와 주문 수량을 비교해 자동으로 갈린다: 재고가 충분하면 `CONFIRMED`로 전이하며 **그 즉시 `stock -= quantity`**, 부족하면 `PRODUCTION`으로 전이(재고는 이 시점엔 변화 없음). 거절(`N`)은 바로 `REJECTED`.
+- `PRODUCTION`은 5번(생산 라인 조회) 화면 진입마다 실행되는 `OrderService.advance_production_line()`이 시간 경과에 따라 자동으로 `CONFIRMED`로 전이시키고, 그때 `stock += production_quantity - quantity`로 재고를 정산한다(부족분 보충과 이 주문 소비분 차감을 함께 반영). 생산 라인은 1개(단일 라인)라 한 번에 하나의 주문만 처리되며, 나머지는 승인 시각 기준 FIFO로 대기열에서 순서를 기다린다. 자세한 계산식은 `docs/05-생산라인조회.md` 참고.
+- **재고 차감은 항상 `CONFIRMED`가 되는 시점(승인 즉시 또는 생산 완료 시)에 끝난다.** 6번(출고 처리) 메뉴는 `CONFIRMED → RELEASE` 상태 전이만 할 뿐 재고를 건드리지 않는다.
 
 ## 기능 범위
 

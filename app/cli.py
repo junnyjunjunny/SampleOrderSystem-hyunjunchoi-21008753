@@ -275,10 +275,60 @@ def order_approval_menu(sample_repo: SampleRepository, order_repo: OrderReposito
             pause()
 
 
-def ship_order(service: OrderService) -> None:
-    order_id = input("출고할 주문 ID > ").strip()
-    service.ship(order_id)
-    print("출고 완료.")
+def print_release_table(orders, sample_repo: SampleRepository) -> None:
+    if not orders:
+        print("출고 가능한 주문이 없습니다.")
+        return
+    headers = ["번호", "주문번호", "고객", "시료", "수량"]
+    widths = [4, 14, 12, 20, 6]
+    rows = []
+    for i, o in enumerate(orders, start=1):
+        try:
+            sample_name = sample_repo.get(o.sample_id).name
+        except KeyError:
+            sample_name = "(삭제된 시료)"
+        rows.append([i, o.order_id, o.customer_name, sample_name, o.quantity])
+    print_table(headers, rows, widths)
+
+
+def release_menu(sample_repo: SampleRepository, order_repo: OrderRepository, service: OrderService) -> None:
+    page = 0
+    while True:
+        clear_screen()
+        print("\n===== 출고 처리 =====")
+        orders = order_repo.list_all("CONFIRMED")
+        page_items, page, total_pages = paginate(orders, page)
+        print_release_table(page_items, sample_repo)
+        print(f"(페이지 {page + 1}/{total_pages})")
+        choice = input("[N] 다음  [B] 이전  번호 입력(출고)  [0] 뒤로 > ").strip().upper()
+        if choice == "0":
+            return
+        if choice == "N":
+            if page + 1 >= total_pages:
+                print("마지막 페이지입니다.")
+                pause()
+            else:
+                page += 1
+            continue
+        if choice == "B":
+            if page == 0:
+                print("첫 페이지입니다.")
+                pause()
+            else:
+                page -= 1
+            continue
+        try:
+            if not choice.isdigit():
+                raise ValueError(f"잘못된 입력입니다: {choice}")
+            index = int(choice)
+            if not 1 <= index <= len(page_items):
+                raise ValueError(f"올바른 번호를 입력하세요 (1~{len(page_items)})")
+            order = page_items[index - 1]
+            service.ship(order.order_id)
+            print(f"주문 {order.order_id} 출고 처리되었습니다.")
+        except (ValueError, KeyError) as exc:
+            print(f"[오류] {exc}")
+        pause()
 
 
 ORDER_VOLUME_STATUSES = ["RECEIVED", "CONFIRMED", "PRODUCTION", "RELEASE"]
@@ -447,7 +497,7 @@ def run(sample_repo: SampleRepository, order_repo: OrderRepository, service: Ord
         "3": lambda: order_approval_menu(sample_repo, order_repo, service),
         "4": lambda: monitoring_menu(sample_repo, order_repo),
         "5": lambda: production_line_menu(sample_repo, order_repo, service),
-        "6": lambda: ship_order(service),
+        "6": lambda: release_menu(sample_repo, order_repo, service),
     }
     while True:
         clear_screen()
@@ -465,5 +515,5 @@ def run(sample_repo: SampleRepository, order_repo: OrderRepository, service: Ord
             action()
         except (ValueError, KeyError) as exc:
             print(f"[오류] {exc}")
-        if choice not in ("1", "2", "3", "4", "5"):
+        if choice not in ("1", "2", "3", "4", "5", "6"):
             pause()

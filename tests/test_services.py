@@ -29,6 +29,10 @@ class OrderServiceTest(unittest.TestCase):
         self.assertEqual(status, "CONFIRMED")
         self.assertEqual(self.order_repo.get("O1").status, "CONFIRMED")
 
+    def test_decide_confirms_and_deducts_stock_immediately(self):
+        self.service.decide("O1", approve=True)  # 재고 20 >= 주문 10 -> 즉시 CONFIRMED
+        self.assertEqual(self.sample_repo.get("S1").stock, 10)  # 20 - 10, 출고 전에 이미 차감됨
+
     def test_decide_approve_with_insufficient_stock_moves_to_production(self):
         self.order_repo.create(Order("O2", "S1", "ACME", 100, "RECEIVED", "2026-01-01T00:00:00"))
         status = self.service.decide("O2", approve=True)
@@ -56,23 +60,24 @@ class OrderServiceTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.service.decide("O1", approve=True)
 
-    def test_complete_production_confirms_and_restocks(self):
+    def test_complete_production_confirms_and_settles_stock(self):
         self.order_repo.create(Order("O2", "S1", "ACME", 100, "RECEIVED", "2026-01-01T00:00:00"))
         self.service.decide("O2", approve=True)  # -> PRODUCTION (재고 20 < 100, 부족분 80, 수율 0.95 -> 실생산량 85)
         self.assertEqual(self.order_repo.get("O2").production_quantity, 85)
         self.service.complete_production("O2")
         self.assertEqual(self.order_repo.get("O2").status, "CONFIRMED")
-        self.assertEqual(self.sample_repo.get("S1").stock, 105)  # 20 + 85(production_quantity), not order.quantity(100)
+        # 20 + 85(production_quantity, 보충) - 100(quantity, 이 주문 소비분) = 5
+        self.assertEqual(self.sample_repo.get("S1").stock, 5)
 
     def test_complete_production_without_production_status_raises(self):
         with self.assertRaises(ValueError):
             self.service.complete_production("O1")  # 아직 RECEIVED
 
-    def test_confirmed_then_ship_deducts_stock(self):
-        self.service.decide("O1", approve=True)  # -> CONFIRMED (재고 20 >= 10)
+    def test_ship_does_not_change_stock(self):
+        self.service.decide("O1", approve=True)  # -> CONFIRMED, 재고 20 -> 10로 이미 차감됨
         self.service.ship("O1")
         self.assertEqual(self.order_repo.get("O1").status, "RELEASE")
-        self.assertEqual(self.sample_repo.get("S1").stock, 10)
+        self.assertEqual(self.sample_repo.get("S1").stock, 10)  # 출고는 재고를 건드리지 않음
 
     def test_ship_without_confirmation_raises(self):
         with self.assertRaises(ValueError):
@@ -108,7 +113,7 @@ class OrderServiceProductionLineTest(unittest.TestCase):
         self.service.advance_production_line()
         order = self.order_repo.get(order_id)
         self.assertEqual(order.status, "CONFIRMED")
-        self.assertEqual(self.sample_repo.get("S1").stock, 10)
+        self.assertEqual(self.sample_repo.get("S1").stock, 0)  # 0 + 10(production_quantity) - 10(quantity) = 0
 
     def test_advance_starts_next_waiting_order_after_current_completes(self):
         order_a = self.service.receive_order("S1", "ACME", 10)

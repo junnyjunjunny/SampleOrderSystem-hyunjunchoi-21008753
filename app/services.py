@@ -40,6 +40,7 @@ class OrderService:
         sample = self.sample_repo.get(order.sample_id)
         if sample.stock >= order.quantity:
             self._transition(order_id, CONFIRMED)
+            self.sample_repo.update_stock(sample.sample_id, sample.stock - order.quantity)
             return CONFIRMED
         shortage = order.quantity - sample.stock
         production_quantity = math.ceil(shortage / sample.yield_rate)
@@ -55,7 +56,7 @@ class OrderService:
             raise ValueError(f"Cannot complete production for order {order_id} from status {order.status}")
         sample = self.sample_repo.get(order.sample_id)
         self._transition(order_id, CONFIRMED)
-        self.sample_repo.update_stock(sample.sample_id, sample.stock + order.production_quantity)
+        self.sample_repo.update_stock(sample.sample_id, sample.stock + order.production_quantity - order.quantity)
 
     def advance_production_line(self) -> None:
         orders = self.order_repo.list_all(PRODUCTION)
@@ -81,7 +82,4 @@ class OrderService:
                 self.order_repo.set_production_started_at(next_order.order_id, datetime.now(timezone.utc).isoformat())
 
     def ship(self, order_id: str) -> None:
-        order = self.order_repo.get(order_id)
-        sample = self.sample_repo.get(order.sample_id)
         self._transition(order_id, RELEASE)
-        self.sample_repo.update_stock(sample.sample_id, sample.stock - order.quantity)
